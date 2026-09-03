@@ -73,3 +73,7 @@ base URL with `http://localhost:8080/gw` and use the same API key. See `docs/`.
 - [Ask Galileo assistant](docs/assistant.md)
 - [Boards V2 and collaboration](docs/boards.md)
 - [Logs: pipelines, log metrics, usage and quotas](docs/logs.md)
+
+## Integrating your app
+
+See [docs/integrating.md](docs/integrating.md) for the step-by-step guide (keys, endpoints, SDKs per stack, gateway, deploy markers) and [docs/melea.md](docs/melea.md) for the melea setup and for hosting Galileo on two domains (UI at https://galileo.serious-sam.dev, API at https://galileo-api.serious-sam.dev).

@@ -59,7 +59,8 @@ services:
       GALILEO_SERVER__SECRET_KEY: ${GALILEO_SECRET_KEY}
       GALILEO_CLICKHOUSE__URL: http://clickhouse:8123
       GALILEO_POSTGRES__URL: postgres://galileo:galileo@postgres:5432/galileo
-      GALILEO_PUBLIC_URL: ${GALILEO_PUBLIC_API:-http://localhost:3000}
+      # Where people reach the UI: links in notifications and the SSO landing page.
+      GALILEO_PUBLIC_URL: ${GALILEO_PUBLIC_URL:-http://localhost:3000}
       GALILEO_SMTP__HOST: ${GALILEO_SMTP_HOST:-}
       GALILEO_SMTP__PORT: ${GALILEO_SMTP_PORT:-587}
       GALILEO_SMTP__USER: ${GALILEO_SMTP_USER:-}

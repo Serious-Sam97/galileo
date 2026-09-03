@@ -1,0 +1,59 @@
+# Production override: two hostnames via Caddy (automatic TLS), databases not published.
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# deploy/.env must set:
+#   GALILEO_SECRET_KEY     64 hex chars (openssl rand -hex 32)
+#   GALILEO_WEB_DOMAIN     galileo.serious-sam.dev          (UI)
+#   GALILEO_API_DOMAIN     galileo-api.serious-sam.dev      (API + gateway + OTLP)
+#   GALILEO_PUBLIC_URL     https://galileo.serious-sam.dev      links in notifications, SSO landing
+#   GALILEO_PUBLIC_API     https://galileo-api.serious-sam.dev  baked into the web build
+#   GALILEO_CORS_ORIGINS   ["https://galileo.serious-sam.dev"]  the UI origin calling the API
+# Optional: GALILEO_SMTP_*, GALILEO_OIDC_*.
+services:
+  caddy:
+    image: caddy:2
+    container_name: galileo-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      GALILEO_WEB_DOMAIN: ${GALILEO_WEB_DOMAIN:-galileo.serious-sam.dev}
+      GALILEO_API_DOMAIN: ${GALILEO_API_DOMAIN:-galileo-api.serious-sam.dev}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - galileo-caddy-data:/data
+      - galileo-caddy-config:/config
+    depends_on:
+      - server
+      - web
+
+  server:
+    ports: !override
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    environment:
+      GALILEO_SERVER__CORS_ORIGINS: ${GALILEO_CORS_ORIGINS:-["https://galileo.serious-sam.dev"]}
+    restart: unless-stopped
+
+  web:
+    ports: !override
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+  clickhouse:
+    ports: !override
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9000:9000"
+    restart: unless-stopped
+
+  postgres:
+    ports: !override
+      - "127.0.0.1:5433:5432"
+    restart: unless-stopped
+
+volumes:
+  galileo-caddy-data:
+  galileo-caddy-config:

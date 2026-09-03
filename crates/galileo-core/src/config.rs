@@ -245,6 +245,18 @@ mod tests {
         });
     }
 
+    /// The deploy `.env` sets a JSON-ish list; figment must turn it into a Vec.
+    #[test]
+    #[allow(clippy::result_large_err)]
+    fn cors_origins_from_env() {
+        figment::Jail::expect_with(|jail| {
+            jail.set_env("GALILEO_SERVER__CORS_ORIGINS", r#"["https://galileo.serious-sam.dev","https://galileo-api.serious-sam.dev"]"#);
+            let c = Config::load(Some(Path::new("nope.toml"))).unwrap();
+            assert_eq!(c.server.cors_origins, vec!["https://galileo.serious-sam.dev", "https://galileo-api.serious-sam.dev"]);
+            Ok(())
+        });
+    }
+
     #[test]
     fn secret_key_validation() {
         let mut c = Config::default();

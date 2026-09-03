@@ -183,7 +183,7 @@ pub async fn invite_accept(State(st): State<AppState>, headers: HeaderMap, Path(
     let ua = headers.get("user-agent").and_then(|v| v.to_str().ok()).unwrap_or("");
     users::create_session(&st.pg, user.id, &auth::hash_token(&token), auth::session_expiry(), ua).await?;
     let first_project: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM projects WHERE org_id = $1 ORDER BY created_at LIMIT 1").bind(inv.org_id).fetch_optional(&st.pg).await?;
-    Ok((auth::set_cookie_header(auth::session_cookie(&token, false)), Json(json!({ "user": user, "org_id": inv.org_id, "project_id": first_project.map(|p| p.0), "token": token }))))
+    Ok((auth::set_cookie_header(auth::session_cookie(&token, auth::secure_cookies(&st.config))), Json(json!({ "user": user, "org_id": inv.org_id, "project_id": first_project.map(|p| p.0), "token": token }))))
 }
 
 // ------------------------------------------------------------------ personal API tokens

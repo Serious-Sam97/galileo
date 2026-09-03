@@ -65,7 +65,7 @@ pub async fn register(State(st): State<AppState>, headers: HeaderMap, Json(b): J
     let ua = headers.get("user-agent").and_then(|v| v.to_str().ok()).unwrap_or("");
     users::create_session(&st.pg, user.id, &auth::hash_token(&token), auth::session_expiry(), ua).await?;
     Ok((
-        auth::set_cookie_header(auth::session_cookie(&token, false)),
+        auth::set_cookie_header(auth::session_cookie(&token, auth::secure_cookies(&st.config))),
         Json(json!({ "user": user, "org": org, "project": project, "token": token })),
     ))
 }
@@ -83,7 +83,7 @@ pub async fn login(State(st): State<AppState>, headers: HeaderMap, Json(b): Json
     let token = auth::new_token();
     let ua = headers.get("user-agent").and_then(|v| v.to_str().ok()).unwrap_or("");
     users::create_session(&st.pg, user.id, &auth::hash_token(&token), auth::session_expiry(), ua).await?;
-    Ok((auth::set_cookie_header(auth::session_cookie(&token, false)), Json(json!({ "user": user, "token": token }))))
+    Ok((auth::set_cookie_header(auth::session_cookie(&token, auth::secure_cookies(&st.config))), Json(json!({ "user": user, "token": token }))))
 }
 
 pub async fn logout(State(st): State<AppState>, headers: HeaderMap) -> ApiResult<impl IntoResponse> {

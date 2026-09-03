@@ -53,7 +53,7 @@ pub async fn oidc_start(State(st): State<AppState>) -> ApiResult<Response> {
     let state = auth::new_token(); let nonce = auth::new_token(); let verifier = auth::new_token();
     let challenge = B64.encode(Sha256::digest(verifier.as_bytes()));
     let payload = json!({ "state": state, "nonce": nonce, "verifier": verifier, "exp": chrono::Utc::now().timestamp() + 600 }).to_string();
-    let cookie = format!("galileo_oidc={}; Path=/api/auth/oidc; HttpOnly; SameSite=Lax; Max-Age=600", sign_state(&st.secret, &payload));
+    let cookie = format!("galileo_oidc={}; Path=/api/auth/oidc; HttpOnly; SameSite=Lax; Max-Age=600{}", sign_state(&st.secret, &payload), if auth::secure_cookies(&st.config) { "; Secure" } else { "" });
     let redirect = format!("{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&nonce={}&code_challenge={}&code_challenge_method=S256",
         auth_ep, urlencode(&cfg.client_id), urlencode(&cfg.redirect_url), urlencode("openid email profile"), state, nonce, challenge);
     let mut resp = Redirect::temporary(&redirect).into_response();
@@ -117,7 +117,7 @@ pub async fn oidc_callback(State(st): State<AppState>, headers: HeaderMap, Query
     let ua = headers.get("user-agent").and_then(|v| v.to_str().ok()).unwrap_or("");
     users::create_session(&st.pg, user_id, &auth::hash_token(&token), auth::session_expiry(), ua).await?;
     let mut resp = Redirect::temporary(&format!("{}/", st.config.public_url.trim_end_matches('/').replace(":8080", ":3000"))).into_response();
-    resp.headers_mut().insert(header::SET_COOKIE, auth::session_cookie(&token, false));
+    resp.headers_mut().insert(header::SET_COOKIE, auth::session_cookie(&token, auth::secure_cookies(&st.config)));
     resp.headers_mut().append(header::SET_COOKIE, HeaderValue::from_static("galileo_oidc=; Path=/api/auth/oidc; Max-Age=0"));
     Ok(resp)
 }
@@ -185,7 +185,7 @@ pub async fn twofa_verify(State(st): State<AppState>, headers: HeaderMap, Json(b
     let token = auth::new_token();
     let ua = headers.get("user-agent").and_then(|v| v.to_str().ok()).unwrap_or("");
     users::create_session(&st.pg, user.id, &auth::hash_token(&token), auth::session_expiry(), ua).await?;
-    Ok((StatusCode::OK, auth::set_cookie_header(auth::session_cookie(&token, false)), Json(json!({ "user": user, "token": token }))).into_response())
+    Ok((StatusCode::OK, auth::set_cookie_header(auth::session_cookie(&token, auth::secure_cookies(&st.config))), Json(json!({ "user": user, "token": token }))).into_response())
 }
 
 #[cfg(test)]

@@ -59,6 +59,12 @@ pub fn session_expiry() -> DateTime<Utc> {
     Utc::now() + Duration::days(SESSION_DAYS)
 }
 
+/// `Secure` cookies as soon as the public URL is https; plain http (localhost) keeps them off,
+/// otherwise the browser would drop the session.
+pub fn secure_cookies(config: &galileo_core::config::Config) -> bool {
+    config.public_url.starts_with("https://")
+}
+
 pub fn session_cookie(token: &str, secure: bool) -> HeaderValue {
     let mut v = format!(
         "{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",

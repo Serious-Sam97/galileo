@@ -1,0 +1,33 @@
+# Galileo behind two hostnames, TLS obtained automatically.
+#   web  → the UI            (GALILEO_WEB_DOMAIN, default galileo.serious-sam.dev)
+#   api  → API + gateway + OTLP ingest + rum.js (GALILEO_API_DOMAIN, default galileo-api.serious-sam.dev)
+# Both are subdomains of one site, so the session cookie set by the API is sent on
+# same-site requests from the UI; the API still needs the UI origin in GALILEO_CORS_ORIGINS.
+
+{$GALILEO_WEB_DOMAIN:galileo.serious-sam.dev} {
+	encode zstd gzip
+
+	# Acknowledge links in e-mail/Slack are built from GALILEO_PUBLIC_URL (this domain).
+	# Only this one API path is proxied here, so the UI keeps its own /api/render route.
+	handle /api/ack/* {
+		reverse_proxy server:8080
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}
+
+{$GALILEO_API_DOMAIN:galileo-api.serious-sam.dev} {
+	encode zstd gzip
+
+	# OTLP/HTTP ingest: https://<api domain>/otlp/v1/traces → server:4318/v1/traces
+	handle_path /otlp/* {
+		reverse_proxy server:4318
+	}
+
+	# /api, /gw and /rum.js
+	handle {
+		reverse_proxy server:8080
+	}
+}
