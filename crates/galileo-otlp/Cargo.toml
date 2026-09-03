@@ -1,0 +1,30 @@
+[package]
+name = "galileo-otlp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+galileo-core.workspace = true
+galileo-storage.workspace = true
+opentelemetry-proto.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+prost.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+bytes.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+hex.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+dashmap.workspace = true
+async-trait.workspace = true
+tower-http.workspace = true
+
+[dev-dependencies]
+tower.workspace = true

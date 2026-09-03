@@ -1,0 +1,50 @@
+# Galileo server configuration. Every key can be overridden with GALILEO_<SECTION>__<KEY>,
+# e.g. GALILEO_CLICKHOUSE__URL=http://ch:8123
+
+[server]
+api_addr = "127.0.0.1:8080"
+otlp_grpc_addr = "127.0.0.1:4317"
+otlp_http_addr = "127.0.0.1:4318"
+# Comma-separated origins allowed to call the API from a browser (the Next.js dev server).
+cors_origins = ["http://localhost:3000"]
+# 32-byte hex key used to encrypt provider secrets at rest and sign sessions.
+# Generate: openssl rand -hex 32
+secret_key = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[clickhouse]
+url = "http://127.0.0.1:8123"
+database = "galileo"
+user = "galileo"
+password = "galileo"
+
+[postgres]
+url = "postgres://galileo:galileo@127.0.0.1:5433/galileo"
+max_connections = 10
+
+[ingest]
+# Flush the write buffer when it reaches this many rows or this much time has passed.
+batch_max_rows = 5000
+batch_max_wait = "1s"
+# Hard cap on queued rows before ingest starts returning 429 / RESOURCE_EXHAUSTED.
+max_queued_rows = 200000
+
+[retention]
+spans = "30d"
+logs = "14d"
+metrics = "90d"
+
+# URL where people open the UI (used in e-mails and invite links).
+public_url = "http://localhost:3000"
+
+[smtp]
+# Leave host empty to disable e-mail channels. security: starttls | tls | none
+host = ""
+port = 587
+user = ""
+password = ""
+from = "Galileo <galileo@localhost>"
+security = "starttls"
+
+[alerts]
+# How often the trigger/SLO evaluator wakes up.
+tick = "30s"

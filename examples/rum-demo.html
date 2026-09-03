@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Galileo RUM demo</title>
+<!-- Replace key/endpoint/propagate with your own. data-propagate lists the API origins that should receive traceparent (they must allow it in CORS). -->
+<script src="http://localhost:8080/rum.js" data-key="__KEY__" data-service="melea-web-demo" data-endpoint="http://localhost:4318" data-propagate="http://aumiau.localhost:8003" data-env="dev" data-version="demo"></script>
+<style>body{font:14px system-ui;margin:2rem;max-width:720px}button{margin:.25rem;padding:.4rem .8rem}pre{background:#f4f4f4;padding:.5rem;max-height:240px;overflow:auto}img{display:block;margin-top:1rem}</style>
+</head>
+<body>
+<h1>Galileo RUM demo</h1>
+<p>Session <code id="sid"></code></p>
+<p>
+  <button id="login">1. Login (melea)</button>
+  <button id="list">2. List patients</button>
+  <button id="slow">3. Slow endpoint</button>
+  <button id="boom">4. Throw JS error</button>
+  <button id="reject">5. Unhandled rejection</button>
+  <button id="nav">6. SPA route change</button>
+  <button id="evt">7. Custom event</button>
+</p>
+<pre id="out"></pre>
+<img src="https://placehold.co/600x200?text=LCP+candidate" alt="big image for LCP" width="600" height="200">
+<script>
+var API = 'http://aumiau.localhost:8003', token = null;
+document.getElementById('sid').textContent = galileoRum.sessionId();
+function out(x) { document.getElementById('out').textContent = (typeof x === 'string' ? x : JSON.stringify(x, null, 1)).slice(0, 2000); }
+function headers() { return token ? { authorization: 'Bearer ' + token, 'content-type': 'application/json' } : { 'content-type': 'application/json' }; }
+document.getElementById('login').onclick = async function () {
+  var r = await fetch(API + '/auth/login/', { method: 'POST', headers: headers(), body: JSON.stringify({ username: 'vet', password: 'vet-demo-123' }) });
+  var j = await r.json(); token = j.token || j.access; galileoRum.setUser('vet', { name: 'Dra. Vet' }); out(j);
+};
+document.getElementById('list').onclick = async function () { var r = await fetch(API + '/api/pacientes/?page_size=5', { headers: headers() }); out(await r.json()); };
+document.getElementById('slow').onclick = async function () { var r = await fetch(API + '/api/consultas/?page_size=3', { headers: headers() }); out(await r.json()); };
+document.getElementById('boom').onclick = function () { setTimeout(function () { var cart = null; cart.total(); }, 0); };
+document.getElementById('reject').onclick = function () { Promise.reject(new Error('payment widget failed to load')); };
+document.getElementById('nav').onclick = function () { history.pushState({}, '', '/app/patients/' + Math.floor(Math.random() * 100)); out('navigated to ' + location.pathname); };
+document.getElementById('evt').onclick = function () { galileoRum.event('checkout.started', { 'cart.items': 3 }); out('event sent'); };
+</script>
+</body>
+</html>

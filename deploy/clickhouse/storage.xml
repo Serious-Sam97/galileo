@@ -1,0 +1,37 @@
+<!-- Tiered storage for ClickHouse: hot data on local disk, cold data moved to S3/MinIO by TTL.
+     Mount at /etc/clickhouse-server/config.d/storage.xml and set `clickhouse.storage_policy = "tiered"`
+     in galileo.toml so migrations add `TTL timestamp + INTERVAL <hot_days> DAY TO VOLUME 'cold'`.
+     Fill in the endpoint/credentials (MinIO shown; AWS S3 works the same with a region endpoint). -->
+<clickhouse>
+  <storage_configuration>
+    <disks>
+      <s3_cold>
+        <type>s3</type>
+        <endpoint>http://minio:9000/galileo-cold/</endpoint>
+        <access_key_id>minioadmin</access_key_id>
+        <secret_access_key>minioadmin</secret_access_key>
+        <metadata_path>/var/lib/clickhouse/disks/s3_cold/</metadata_path>
+      </s3_cold>
+      <s3_cold_cache>
+        <type>cache</type>
+        <disk>s3_cold</disk>
+        <path>/var/lib/clickhouse/disks/s3_cold_cache/</path>
+        <max_size>10Gi</max_size>
+      </s3_cold_cache>
+    </disks>
+    <policies>
+      <tiered>
+        <volumes>
+          <hot><disk>default</disk></hot>
+          <cold><disk>s3_cold_cache</disk></cold>
+        </volumes>
+        <move_factor>0.1</move_factor>
+      </tiered>
+    </policies>
+  </storage_configuration>
+  <!-- Backups go here: BACKUP TABLE ... TO Disk('backups', 'name') -->
+  <backups>
+    <allowed_disk>backups</allowed_disk>
+    <allowed_path>/backups/</allowed_path>
+  </backups>
+</clickhouse>

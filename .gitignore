@@ -1,0 +1,23 @@
+/target
+.env
+web/node_modules
+web/.next
+web/out
+.DS_Store
+.claude/autopilot/state
+deploy/.env
+
+# build outputs and caches (all SDKs)
+**/target/
+**/__pycache__/
+*.pyc
+*.egg-info/
+sdk/android/.gradle/
+sdk/android/build/
+sdk/android/**/build/
+sdk/android/local.properties
+sdk/node/node_modules/
+sdk/node/dist/
+sdk/php/vendor/
+*.env.local
+.env.local

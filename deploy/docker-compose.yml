@@ -1,0 +1,108 @@
+name: galileo
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    container_name: galileo-clickhouse
+    ports:
+      - "8123:8123"   # HTTP
+      - "9000:9000"   # native
+    environment:
+      CLICKHOUSE_DB: galileo
+      CLICKHOUSE_USER: galileo
+      CLICKHOUSE_PASSWORD: galileo
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - galileo-clickhouse:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: galileo-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: galileo
+      POSTGRES_USER: galileo
+      POSTGRES_PASSWORD: galileo
+    volumes:
+      - galileo-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U galileo"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # The Galileo binary: API + LLM gateway (:8080) and OTLP ingest (:4317 gRPC, :4318 HTTP).
+  # For local Rust development run `docker compose stop server` and use `cargo run -p galileo-server`.
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.server
+    image: galileo/server:dev
+    container_name: galileo-server
+    ports:
+      - "8080:8080"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      RUST_LOG: info,galileo=info
+      GALILEO_SERVER__API_ADDR: 0.0.0.0:8080
+      GALILEO_SERVER__OTLP_GRPC_ADDR: 0.0.0.0:4317
+      GALILEO_SERVER__OTLP_HTTP_ADDR: 0.0.0.0:4318
+      GALILEO_SERVER__SECRET_KEY: ${GALILEO_SECRET_KEY}
+      GALILEO_CLICKHOUSE__URL: http://clickhouse:8123
+      GALILEO_POSTGRES__URL: postgres://galileo:galileo@postgres:5432/galileo
+      GALILEO_PUBLIC_URL: ${GALILEO_PUBLIC_API:-http://localhost:3000}
+      GALILEO_SMTP__HOST: ${GALILEO_SMTP_HOST:-}
+      GALILEO_SMTP__PORT: ${GALILEO_SMTP_PORT:-587}
+      GALILEO_SMTP__USER: ${GALILEO_SMTP_USER:-}
+      GALILEO_SMTP__PASSWORD: ${GALILEO_SMTP_PASSWORD:-}
+      GALILEO_SMTP__FROM: ${GALILEO_SMTP_FROM:-Galileo <galileo@localhost>}
+      GALILEO_SMTP__SECURITY: ${GALILEO_SMTP_SECURITY:-starttls}
+      # OIDC single sign-on (optional): set GALILEO_OIDC_* in .env
+      GALILEO_AUTH__OIDC__ISSUER: ${GALILEO_OIDC_ISSUER:-}
+      GALILEO_AUTH__OIDC__CLIENT_ID: ${GALILEO_OIDC_CLIENT_ID:-}
+      GALILEO_AUTH__OIDC__CLIENT_SECRET: ${GALILEO_OIDC_CLIENT_SECRET:-}
+      GALILEO_AUTH__OIDC__REDIRECT_URL: ${GALILEO_OIDC_REDIRECT_URL:-http://localhost:8080/api/auth/oidc/callback}
+      GALILEO_AUTH__OIDC__DEFAULT_ORG: ${GALILEO_OIDC_DEFAULT_ORG:-}
+      GALILEO_AUTH__OIDC__LABEL: ${GALILEO_OIDC_LABEL:-Continue with SSO}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # lets gateway providers and SMTP reach the Mac
+    depends_on:
+      clickhouse: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/system/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # The Next.js UI (:3000). The browser talks to the API directly, so the API URL is baked in
+  # at build time (NEXT_PUBLIC_GALILEO_API); change it if Galileo is not on localhost.
+  web:
+    build:
+      context: ../web
+      dockerfile: ../deploy/Dockerfile.web
+      args:
+        NEXT_PUBLIC_GALILEO_API: ${GALILEO_PUBLIC_API:-http://localhost:8080}
+    image: galileo/web:dev
+    environment:
+      GALILEO_API_INTERNAL: http://server:8080
+    container_name: galileo-web
+    ports:
+      - "3000:3000"
+    depends_on:
+      server: { condition: service_healthy }
+
+volumes:
+  galileo-clickhouse:
+    name: galileo-clickhouse
+  galileo-postgres:
+    name: galileo-postgres

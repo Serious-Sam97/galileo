@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "galileo-django"
+version = "0.2.0"
+description = "Galileo observability for Django: code-level traces, identity on every span and log, gateway-aware."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "Django>=4.2",
+  "opentelemetry-sdk>=1.30",
+  "opentelemetry-exporter-otlp-proto-http>=1.30",
+  "opentelemetry-instrumentation-django>=0.51b0",
+  "opentelemetry-instrumentation-requests>=0.51b0",
+]
+
+[project.optional-dependencies]
+system = ["opentelemetry-instrumentation-system-metrics>=0.51b0", "psutil>=6"]
+dev = ["pytest>=8", "djangorestframework>=3.15", "requests>=2.31"]
+
+[tool.setuptools.packages.find]
+include = ["galileo_django*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+DJANGO_SETTINGS_MODULE = "tests.settings"

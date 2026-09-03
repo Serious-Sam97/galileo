@@ -1,0 +1,75 @@
+[workspace]
+exclude = ["sdk/rust/galileo"]
+resolver = "2"
+members = [
+  "crates/galileo-core",
+  "crates/galileo-storage",
+  "crates/galileo-otlp",
+  "crates/galileo-query",
+  "crates/galileo-gateway",
+  "crates/galileo-alerts",
+  "crates/galileo-api",
+  "crates/galileo-server",
+  "examples/demo-app", "cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/serioussam/galileo"
+
+[workspace.dependencies]
+galileo-core = { path = "crates/galileo-core" }
+galileo-storage = { path = "crates/galileo-storage" }
+galileo-otlp = { path = "crates/galileo-otlp" }
+galileo-query = { path = "crates/galileo-query" }
+galileo-gateway = { path = "crates/galileo-gateway" }
+galileo-alerts = { path = "crates/galileo-alerts" }
+galileo-api = { path = "crates/galileo-api" }
+
+tokio = { version = "1.53", features = ["full"] }
+axum = { version = "0.8", features = ["macros", "json", "http2"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip", "decompression-gzip", "timeout", "limit"] }
+tonic = { version = "0.14", features = ["transport", "gzip"] }
+tonic-prost = "0.14"
+prost = "0.14"
+opentelemetry-proto = { version = "0.32", features = ["gen-tonic", "trace", "logs", "metrics", "with-serde"] }
+clickhouse = { version = "0.15", features = ["inserter", "uuid", "chrono"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json", "migrate"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+figment = { version = "0.10", features = ["toml", "env"] }
+argon2 = "0.5"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "gzip", "multipart"] }
+regex = "1"
+async-stream = "0.3"
+futures = "0.3"
+bytes = "1"
+rand = "0.9"
+hex = "0.4"
+sha2 = "0.10"
+aes-gcm = "0.10"
+base64 = "0.22"
+dirs = "6"
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+sha1 = "0.10"
+hmac = "0.12"
+jsonwebtoken = "9"
+serde_yaml = "0.9"
+dashmap = "6"
+async-trait = "0.1"
+humantime-serde = "1"
+indexmap = { version = "2", features = ["serde"] }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1", "tokio1-rustls-tls", "hostname"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

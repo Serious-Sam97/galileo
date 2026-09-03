@@ -1,0 +1,33 @@
+# Changelog
+
+## 0.3 — V3 (2026-09-03)
+
+- **Ask Galileo**: an assistant on every page (⌘J) that turns questions into queries, investigates issues into root-cause notes and explains traces; every call goes through the gateway so its cost and quality are visible.
+- **Agent observability**: agent runs grouped by conversation with the tool-call loop, tokens and cost per turn; SDK helpers for Python, Node, PHP, Rust and Android.
+- **Gateway control plane**: guardrails (PII, prompt injection, deny lists, per-user spend), semantic cache, golden datasets and prompt CI with a judge, smart routing by live health, spend anomaly alerts.
+- **Boards V2**: drag-and-drop grid, panel types (series, table, stat, heatmap, service map, markdown, issues, SLO), board variables, templates, annotations with @mentions, query history, PNG rendering and "send to Slack/Discord".
+- **Logs and metrics maturity**: log pipelines with live preview, log-based metrics, RED rollups for long retention, cardinality and usage reports, soft and hard quotas.
+- **Monitoring V2**: anomaly and outlier trigger modes, composite triggers, maintenance windows, group mutes, incident timeline with acknowledge links, on-call rotations with escalation.
+- **SDKs**: generic Python (FastAPI, Flask, SQLAlchemy, Celery), Rust (`tracing` layer, sqlx spans, axum middleware), Android (screens, OkHttp, crashes and ANRs, vitals).
+- **Platform**: per-project roles, OIDC single sign-on, TOTP two-factor, config as code (export/import), the `galileo` CLI, OpenAPI reference at `/api/docs`.
+- **UX**: ⌘K command palette, keyboard navigation, light theme, pt-BR, tablet and phone layouts, trace diff, onboarding wizard, this changelog.
+
+## 0.2 — V2 (2026-09-02)
+
+- Code-level traces: call sites, SQL and HTTP spans with `code.*` attributes, N+1 detection.
+- Identity everywhere: user, tenant and session on every span, log and error; user and tenant pages.
+- Issues: grouped exceptions with first/last seen, versions, notes, regression detection.
+- Organizations, projects, members, invites, personal tokens, audit log.
+- Notifications: webhooks, Slack, Discord, Telegram, e-mail; triggers with warn thresholds and per-group evaluation; SLOs with burn-rate alerts; digests.
+- Gateway V2: Anthropic ↔ OpenAI translation, routes with fallbacks, budgets and rate limits, exact-match cache, recorded content, feedback and evals, embeddings and transcription.
+- Browser RUM: `galileo-rum.js`, sessions, web vitals, backend links via `traceparent`.
+- Query V2: text DSL, derived columns, HAVING, compare with a previous period, CSV export, share links, service map.
+- Operations: tail sampling, exponential histograms, tiered storage, backups, health metrics; Node and PHP SDKs.
+
+## 0.1 — V1 (2026-08-30)
+
+- OTLP ingest (gRPC and HTTP) into ClickHouse; spans, logs and metrics.
+- Query builder with calculations, filters, breakdowns, heatmaps and BubbleUp.
+- Trace waterfall, boards, triggers, API keys and redaction rules.
+- LLM gateway with providers, routes and cost accounting.
+- Django SDK for melea.

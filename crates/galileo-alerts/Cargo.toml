@@ -1,0 +1,21 @@
+[package]
+name = "galileo-alerts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lettre.workspace = true
+galileo-core.workspace = true
+galileo-storage.workspace = true
+galileo-query.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+sqlx.workspace = true

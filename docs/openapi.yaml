@@ -1,0 +1,75 @@
+openapi: 3.0.3
+info:
+  title: Galileo API
+  version: "0.3"
+  description: |
+    Observability + LLM gateway. Auth: session cookie (login) or `Authorization: Bearer glt_…` personal token.
+    OTLP ingest is on :4317/:4318 with a project API key (`glk_…`); the gateway is under `/gw/`.
+servers:
+  - url: http://localhost:8080
+security:
+  - bearer: []
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  schemas:
+    Query:
+      type: object
+      description: The query DSL (see docs/query-dsl.md)
+      properties:
+        dataset: { type: string, enum: [spans, logs, metrics] }
+        time_range: { type: object }
+        calculations: { type: array, items: { type: object, properties: { op: { type: string }, field: { type: string } } } }
+        filters: { type: array, items: { type: object, properties: { field: { type: string }, op: { type: string }, value: {} } } }
+        breakdowns: { type: array, items: { type: string } }
+        orders: { type: array, items: { type: object } }
+        limit: { type: integer }
+        derived: { type: array, items: { type: object, properties: { name: { type: string }, expr: { type: string } } } }
+        having: { type: array, items: { type: object } }
+        compare_to: { type: string }
+        prefer_rollup: { type: boolean }
+    Error:
+      type: object
+      properties: { error: { type: object, properties: { code: { type: string }, message: { type: string } } } }
+paths:
+  /api/auth/login: { post: { summary: Password login, security: [], requestBody: { content: { application/json: { schema: { type: object, properties: { email: { type: string }, password: { type: string } } } } } }, responses: { "200": { description: Session cookie + user } } } }
+  /api/auth/2fa/verify: { post: { summary: Second step of a password login (TOTP), security: [], responses: { "200": { description: Session } } } }
+  /api/auth/oidc/start: { get: { summary: Redirect to the OIDC provider, security: [], responses: { "307": { description: Redirect } } } }
+  /api/auth/oidc/callback: { get: { summary: OIDC callback, security: [], responses: { "307": { description: Redirect to the UI with a session } } } }
+  /api/auth/me: { get: { summary: Current user and projects, responses: { "200": { description: OK } } } }
+  /api/auth/tokens: { get: { summary: Personal tokens, responses: { "200": { description: OK } } }, post: { summary: Create a personal token (glt_…), responses: { "200": { description: Token shown once } } } }
+  /api/projects/{id}/query:
+    post:
+      summary: Run a query
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/Query" } } } }
+      responses: { "200": { description: Groups with totals and series, raw rows, or a heatmap }, "422": { description: Invalid query, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } } }
+  /api/projects/{id}/query/parse: { post: { summary: Text DSL → query, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: "{ok, query, text} or {ok:false, error}" } } } }
+  /api/projects/{id}/query/export: { post: { summary: Run a query and download CSV, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: text/csv } } } }
+  /api/projects/{id}/traces/{trace_id}: { get: { summary: Assembled trace (waterfall, N+1), parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { name: trace_id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: TraceView } } } }
+  /api/projects/{id}/bubbleup: { post: { summary: BubbleUp — attributes that distinguish a selection, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: Ranked dimensions } } } }
+  /api/projects/{id}/issues: { get: { summary: Issues (grouped exceptions), parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { name: status, in: query, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/triggers: { get: { summary: Triggers, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } }, post: { summary: Create a trigger (modes threshold|baseline|anomaly|outlier, composite), parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/triggers/preview: { post: { summary: Evaluate a trigger definition now, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: Evaluation } } } }
+  /api/projects/{id}/incidents: { get: { summary: Incidents, parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { name: open, in: query, schema: { type: boolean } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/slos: { get: { summary: SLOs, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/boards: { get: { summary: Boards, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/boards/templates: { post: { summary: Create a board from a template (red|llm|browser), parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/annotations: { get: { summary: Annotations, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } }, post: { summary: Add an annotation (@email mentions notify), parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/deploys: { post: { summary: Record a deploy marker, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/sessions: { get: { summary: Browser/mobile sessions, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/service-map: { get: { summary: Service map nodes and edges, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/agent-runs: { get: { summary: Agent runs (gateway calls by conversation), parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/gateway/routes: { get: { summary: Gateway routes, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } }, post: { summary: Create a route (targets, budget, guardrails, semantic cache, smart routing), parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/gateway/usage: { get: { summary: LLM usage and cost, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/gateway/datasets: { get: { summary: Golden datasets, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/assistant/chat: { post: { summary: Ask Galileo, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: "{answer, steps, recording}" } } } }
+  /api/projects/{id}/log-pipeline: { get: { summary: Log pipeline, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } }, put: { summary: Replace the log pipeline, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/usage: { get: { summary: Ingest usage, cardinality, quotas, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/export: { get: { summary: Configuration bundle (YAML/JSON), parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { name: format, in: query, schema: { type: string, enum: [yaml, json] } }], responses: { "200": { description: Bundle } } } }
+  /api/projects/{id}/import: { post: { summary: Apply a configuration bundle, parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { name: dry_run, in: query, schema: { type: boolean } }], requestBody: { content: { application/yaml: { schema: { type: string } }, application/json: { schema: { type: object } } } }, responses: { "200": { description: "{changes}" } } } }
+  /api/projects/{id}/members: { get: { summary: Project members with effective roles, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/projects/{id}/members/{user_id}: { put: { summary: Set a per-project role (viewer|editor|admin), parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { name: user_id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } }, delete: { summary: Clear the per-project role, parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { name: user_id, in: path, required: true, schema: { type: string } }], responses: { "200": { description: OK } } } }
+  /api/system/health: { get: { summary: Liveness (ClickHouse + Postgres), security: [], responses: { "200": { description: OK }, "503": { description: Degraded } } } }
+  /gw/v1/chat/completions: { post: { summary: OpenAI-compatible chat through a route alias (API key), security: [], responses: { "200": { description: Completion } } } }
+  /gw/v1/messages: { post: { summary: Anthropic-compatible messages through a route alias (API key), security: [], responses: { "200": { description: Message } } } }

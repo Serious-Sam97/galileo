@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "galileo-python"
+version = "0.1.0"
+description = "Galileo observability for any Python service: call-site traces, identity on every span and log, FastAPI/Flask/SQLAlchemy/Celery hooks, gateway and agent helpers."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "opentelemetry-sdk>=1.30",
+  "opentelemetry-exporter-otlp-proto-http>=1.30",
+]
+
+[project.optional-dependencies]
+fastapi = ["starlette>=0.37"]
+flask = ["flask>=3"]
+sqlalchemy = ["sqlalchemy>=2"]
+http = ["opentelemetry-instrumentation-requests>=0.51b0", "opentelemetry-instrumentation-httpx>=0.51b0"]
+celery = ["celery>=5"]
+dev = ["pytest>=8", "fastapi>=0.110", "httpx>=0.27", "sqlalchemy>=2", "uvicorn>=0.30"]
+
+[tool.setuptools.packages.find]
+include = ["galileo*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
