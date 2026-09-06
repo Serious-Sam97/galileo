@@ -21,3 +21,7 @@ sdk/node/dist/
 sdk/php/vendor/
 *.env.local
 .env.local
+
+# python SDK build artifacts (the wheel is vendored into consuming apps, not tracked here)
+sdk/python/build/
+sdk/python/dist/

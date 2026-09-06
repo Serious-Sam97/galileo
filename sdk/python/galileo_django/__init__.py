@@ -9,7 +9,7 @@ from .config import setup, is_enabled
 from .tracing import traced, trace_modules
 
 __all__ = ['setup', 'is_enabled', 'traced', 'trace_modules']
-__version__ = '0.2.0'
+__version__ = '0.2.2'
 
 default_app_config = 'galileo_django.apps.GalileoConfig'
 from . import agent  # noqa: E402,F401

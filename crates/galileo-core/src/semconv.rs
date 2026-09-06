@@ -17,6 +17,8 @@ pub const URL_PATH: &str = "url.path";
 pub const HTTP_TARGET_LEGACY: &str = "http.target";
 
 pub const DB_SYSTEM: &str = "db.system";
+/// semconv ≥ 1.26 spelling (Go, .NET and newer Java instrumentations emit this one).
+pub const DB_SYSTEM_NAME: &str = "db.system.name";
 pub const DB_STATEMENT: &str = "db.query.text";
 pub const DB_STATEMENT_LEGACY: &str = "db.statement";
 
@@ -67,6 +69,18 @@ pub const GEN_AI_TTFT_MS: &str = "gen_ai.galileo.time_to_first_token_ms";
 /// Resolve the first present key from a list of aliases (new + legacy semconv names).
 pub fn first_str<'a>(attrs: &'a crate::Attributes, keys: &[&str]) -> Option<&'a str> {
     keys.iter().find_map(|k| attrs.get(*k).and_then(|v| v.as_str()))
+}
+
+/// First present key as a string. Integers and booleans are stringified: identity attributes such as
+/// `user.id` / `tenant.id` arrive as int64 from typed SDKs (Go, Java) and must still fill the columns.
+pub fn first_string(attrs: &crate::Attributes, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|k| {
+        attrs.get(*k).and_then(|v| {
+            v.as_str().map(str::to_owned)
+                .or_else(|| v.as_i64().map(|i| i.to_string()))
+
+        })
+    })
 }
 
 pub fn first_i64(attrs: &crate::Attributes, keys: &[&str]) -> Option<i64> {

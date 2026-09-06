@@ -160,21 +160,19 @@ impl From<&Span> for SpanRow {
                 .unwrap_or(0)
                 .clamp(0, u16::MAX as i64) as u16,
             url_path: s(a, &[sc::URL_PATH, sc::HTTP_TARGET_LEGACY]),
-            db_system: s(a, &[sc::DB_SYSTEM]),
-            db_operation: s(a, &[sc::DB_OPERATION, sc::DB_OPERATION_NEW]),
-            db_table: s(a, &[sc::DB_TABLE, sc::DB_TABLE_NEW]),
+            db_system: s(a, &[sc::DB_SYSTEM, sc::DB_SYSTEM_NAME]),
+            db_operation: { let v = s(a, &[sc::DB_OPERATION, sc::DB_OPERATION_NEW]); if v.is_empty() { sql_shape(sc::first_str(a, &[sc::DB_STATEMENT, sc::DB_STATEMENT_LEGACY]).unwrap_or("")).0 } else { v } },
+            db_table: { let v = s(a, &[sc::DB_TABLE, sc::DB_TABLE_NEW]); if v.is_empty() { sql_shape(sc::first_str(a, &[sc::DB_STATEMENT, sc::DB_STATEMENT_LEGACY]).unwrap_or("")).1 } else { v } },
             request_id: s(a, &[sc::REQUEST_ID]),
             code_function: s(a, &[sc::CODE_FUNCTION, sc::CODE_FUNCTION_LEGACY]),
             code_namespace: s(a, &[sc::CODE_NAMESPACE]),
             code_file: s(a, &[sc::CODE_FILE, sc::CODE_FILE_LEGACY]),
             code_line: sc::first_i64(a, &[sc::CODE_LINE, sc::CODE_LINE_LEGACY]).unwrap_or(0).clamp(0, u32::MAX as i64) as u32,
-            user_id: sc::first_str(a, &[sc::USER_ID, sc::ENDUSER_ID_LEGACY])
-                .or_else(|| sc::first_str(r, &[sc::USER_ID]))
-                .map(str::to_owned)
+            user_id: sc::first_string(a, &[sc::USER_ID, sc::ENDUSER_ID_LEGACY])
+                .or_else(|| sc::first_string(r, &[sc::USER_ID]))
                 .unwrap_or_default(),
-            tenant_id: sc::first_str(a, &[sc::TENANT_ID])
-                .or_else(|| sc::first_str(r, &[sc::TENANT_ID]))
-                .map(str::to_owned)
+            tenant_id: sc::first_string(a, &[sc::TENANT_ID])
+                .or_else(|| sc::first_string(r, &[sc::TENANT_ID]))
                 .unwrap_or_default(),
             exception_type,
             exception_message,
@@ -311,8 +309,8 @@ impl From<&LogRecord> for LogRow {
             deployment_env: s(r, &[sc::DEPLOYMENT_ENV, sc::DEPLOYMENT_ENV_LEGACY]),
             host_name: s(r, &[sc::HOST_NAME]),
             scope_name: l.scope_name.clone(),
-            user_id: s(a, &[sc::USER_ID, sc::ENDUSER_ID_LEGACY]),
-            tenant_id: s(a, &[sc::TENANT_ID]),
+            user_id: sc::first_string(a, &[sc::USER_ID, sc::ENDUSER_ID_LEGACY]).unwrap_or_default(),
+            tenant_id: sc::first_string(a, &[sc::TENANT_ID]).unwrap_or_default(),
             request_id: s(a, &[sc::REQUEST_ID]),
             code_function: s(a, &[sc::CODE_FUNCTION, sc::CODE_FUNCTION_LEGACY]),
             resource: str_map(&l.resource),
@@ -479,5 +477,42 @@ mod tests {
         assert_eq!(back.events.len(), 1);
         assert_eq!(back.links.len(), 1);
         assert_eq!(back.events[0].attributes["exception.type"], AttributeValue::from("NotFound"));
+    }
+}
+
+/// (operation, table) guessed from a SQL statement when the SDK did not send `db.operation.name`
+/// / `db.collection.name`. Plain OpenTelemetry clients (pgx, database/sql, JDBC) only send the text.
+pub fn sql_shape(stmt: &str) -> (String, String) {
+    let mut rest = stmt.trim_start();
+    // leading comments: /* ... */
+    while let Some(after) = rest.strip_prefix("/*") {
+        match after.find("*/") { Some(i) => rest = after[i + 2..].trim_start(), None => return (String::new(), String::new()) }
+    }
+    let mut words = rest.split_whitespace();
+    let op = words.next().map(|w| w.trim_matches(|c: char| !c.is_ascii_alphabetic()).to_ascii_uppercase()).unwrap_or_default();
+    let keyword = match op.as_str() { "SELECT" | "DELETE" => "FROM", "INSERT" => "INTO", "UPDATE" => "UPDATE", _ => return (op, String::new()) };
+    let table = if keyword == "UPDATE" {
+        words.next()
+    } else {
+        let mut it = rest.split_whitespace();
+        let mut found = None;
+        while let Some(w) = it.next() { if w.eq_ignore_ascii_case(keyword) { found = it.next(); break; } }
+        found
+    };
+    let table = table.map(|t| t.trim_matches(|c: char| c == '"' || c == '`' || c == '(' || c == ')' || c == ',' || c == ';').to_string()).unwrap_or_default();
+    (op, table)
+}
+
+#[cfg(test)]
+mod sql_shape_tests {
+    use super::sql_shape;
+    #[test]
+    fn guesses_operation_and_table() {
+        assert_eq!(sql_shape("SELECT * FROM \"agenda_consulta\" WHERE id = $1"), ("SELECT".into(), "agenda_consulta".into()));
+        assert_eq!(sql_shape("insert into pets (a) values ($1)"), ("INSERT".into(), "pets".into()));
+        assert_eq!(sql_shape("UPDATE tenants SET x = 1"), ("UPDATE".into(), "tenants".into()));
+        assert_eq!(sql_shape("DELETE FROM sessions WHERE t < now()"), ("DELETE".into(), "sessions".into()));
+        assert_eq!(sql_shape("/* hint */ SELECT 1"), ("SELECT".into(), String::new()));
+        assert_eq!(sql_shape("BEGIN"), ("BEGIN".into(), String::new()));
     }
 }

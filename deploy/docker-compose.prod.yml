@@ -8,7 +8,7 @@
 #   GALILEO_PUBLIC_URL     https://galileo.serious-sam.dev      links in notifications, SSO landing
 #   GALILEO_PUBLIC_API     https://galileo-api.serious-sam.dev  baked into the web build
 #   GALILEO_CORS_ORIGINS   ["https://galileo.serious-sam.dev"]  the UI origin calling the API
-# Optional: GALILEO_SMTP_*, GALILEO_OIDC_*.
+# Optional: GALILEO_SMTP_*, GALILEO_OIDC_*, GALILEO_HOST_*_PORT (loopback port remaps).
 services:
   caddy:
     image: caddy:2
@@ -29,29 +29,31 @@ services:
       - server
       - web
 
+  # Host-side ports are loopback only (Caddy reaches containers over the compose network).
+  # Remap them in .env when another stack already holds the defaults, e.g. GALILEO_HOST_API_PORT=8084.
   server:
     ports: !override
-      - "127.0.0.1:8080:8080"
-      - "127.0.0.1:4317:4317"
-      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:${GALILEO_HOST_API_PORT:-8080}:8080"
+      - "127.0.0.1:${GALILEO_HOST_OTLP_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${GALILEO_HOST_OTLP_HTTP_PORT:-4318}:4318"
     environment:
       GALILEO_SERVER__CORS_ORIGINS: ${GALILEO_CORS_ORIGINS:-["https://galileo.serious-sam.dev"]}
     restart: unless-stopped
 
   web:
     ports: !override
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${GALILEO_HOST_WEB_PORT:-3000}:3000"
     restart: unless-stopped
 
   clickhouse:
     ports: !override
-      - "127.0.0.1:8123:8123"
-      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:${GALILEO_HOST_CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "127.0.0.1:${GALILEO_HOST_CLICKHOUSE_NATIVE_PORT:-9000}:9000"
     restart: unless-stopped
 
   postgres:
     ports: !override
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:${GALILEO_HOST_POSTGRES_PORT:-5433}:5432"
     restart: unless-stopped
 
 volumes:

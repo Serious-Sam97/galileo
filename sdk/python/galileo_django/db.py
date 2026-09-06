@@ -38,20 +38,29 @@ def parse_sql(sql: str):
     return op, table
 
 
+MAX_STATEMENT = 2048
+
+
 class _Wrapper:
-    def __init__(self, base_dir, capture_params):
+    def __init__(self, base_dir, capture_params, call_sites=True):
         self.base_dir = base_dir
         self.capture_params = capture_params
+        self.call_sites = call_sites
 
     def __call__(self, execute, sql, params, many, context):
+        # A request that sampling dropped (or no provider at all) must cost nothing here: no
+        # SQL parsing, no stack walk, no span object. This is what makes GALILEO_SAMPLE_RATIO
+        # a real CPU knob rather than only an export knob.
+        if not trace.get_current_span().is_recording():
+            return execute(sql, params, many, context)
         conn = context.get('connection')
         vendor = getattr(conn, 'vendor', 'sql')
         op, table = parse_sql(sql)
         name = f'{op} {table}' if table else (op or 'query')
+        text = sql if len(sql) <= MAX_STATEMENT else sql[:MAX_STATEMENT] + '…'
         attrs = {
             'db.system': {'postgresql': 'postgresql', 'mysql': 'mysql', 'sqlite': 'sqlite'}.get(vendor, vendor),
-            'db.statement': sql,
-            'db.query.text': sql,
+            'db.query.text': text,
             'db.operation': op,
             'db.table': table,
             'db.name': getattr(conn, 'alias', 'default'),
@@ -61,9 +70,10 @@ class _Wrapper:
             attrs['db.executemany'] = True
         if self.capture_params and params and not many:
             attrs['db.params'] = redact_params(params)
-        frame = app_frame()
-        if frame is not None:
-            attrs.update(code_attributes(frame, self.base_dir))
+        if self.call_sites:
+            frame = app_frame()
+            if frame is not None:
+                attrs.update(code_attributes(frame, self.base_dir))
         with _tracer.start_as_current_span(name, kind=SpanKind.CLIENT, attributes=attrs) as span:
             try:
                 result = execute(sql, params, many, context)
@@ -78,9 +88,9 @@ class _Wrapper:
             return result
 
 
-def install(base_dir=None):
+def install(base_dir=None, call_sites=True):
     """Attach the wrapper to every connection, present and future."""
-    wrapper = _Wrapper(base_dir, os.environ.get('GALILEO_SQL_PARAMS') == '1')
+    wrapper = _Wrapper(base_dir, os.environ.get('GALILEO_SQL_PARAMS') == '1', call_sites=call_sites)
 
     def attach(connection):
         if getattr(connection, '_galileo_wrapped', False):

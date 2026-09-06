@@ -1,0 +1,36 @@
+# Galileo behind a Cloudflare Tunnel (or any TLS-terminating proxy in front of this host).
+# Cloudflare owns the certificates, so Caddy serves plain HTTP on :80 and never runs ACME.
+# Tunnel ingress: BOTH hostnames → http://localhost:80 (Caddy). Do not point the tunnel at
+# the API/web ports directly: the /otlp/* route and the acknowledge-link route live here.
+#
+# Use it by mounting this file instead of Caddyfile in docker-compose.prod.yml:
+#   volumes: [ ./Caddyfile.cloudflare:/etc/caddy/Caddyfile:ro, ... ]
+
+{
+	auto_https off
+}
+
+http://{$GALILEO_WEB_DOMAIN:galileo.serious-sam.dev} {
+	encode zstd gzip
+
+	handle /api/ack/* {
+		reverse_proxy server:8080
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}
+
+http://{$GALILEO_API_DOMAIN:galileo-api.serious-sam.dev} {
+	encode zstd gzip
+
+	# https://<api domain>/otlp/v1/traces → server:4318/v1/traces
+	handle_path /otlp/* {
+		reverse_proxy server:4318
+	}
+
+	handle {
+		reverse_proxy server:8080
+	}
+}
