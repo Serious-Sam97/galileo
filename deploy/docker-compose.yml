@@ -5,8 +5,8 @@ services:
     image: clickhouse/clickhouse-server:25.8
     container_name: galileo-clickhouse
     ports:
-      - "8123:8123"   # HTTP
-      - "9000:9000"   # native
+      - "${GALILEO_HOST_CLICKHOUSE_HTTP_PORT:-8123}:8123"   # HTTP
+      - "${GALILEO_HOST_CLICKHOUSE_NATIVE_PORT:-9000}:9000"   # native
     environment:
       CLICKHOUSE_DB: galileo
       CLICKHOUSE_USER: galileo
@@ -26,7 +26,7 @@ services:
     image: postgres:17-alpine
     container_name: galileo-postgres
     ports:
-      - "5433:5432"
+      - "${GALILEO_HOST_POSTGRES_PORT:-5433}:5432"
     environment:
       POSTGRES_DB: galileo
       POSTGRES_USER: galileo
@@ -48,9 +48,9 @@ services:
     image: galileo/server:dev
     container_name: galileo-server
     ports:
-      - "8080:8080"
-      - "4317:4317"
-      - "4318:4318"
+      - "${GALILEO_HOST_API_PORT:-8080}:8080"
+      - "${GALILEO_HOST_OTLP_GRPC_PORT:-4317}:4317"
+      - "${GALILEO_HOST_OTLP_HTTP_PORT:-4318}:4318"
     environment:
       RUST_LOG: info,galileo=info
       GALILEO_SERVER__API_ADDR: 0.0.0.0:8080
@@ -98,7 +98,7 @@ services:
       GALILEO_API_INTERNAL: http://server:8080
     container_name: galileo-web
     ports:
-      - "3000:3000"
+      - "${GALILEO_HOST_WEB_PORT:-3000}:3000"
     depends_on:
       server: { condition: service_healthy }
 
