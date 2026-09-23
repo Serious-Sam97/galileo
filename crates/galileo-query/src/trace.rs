@@ -94,7 +94,7 @@ fn repeated_queries(spans: &[Span]) -> (usize, f64, Vec<RepeatedQuery>) {
     let mut db_calls = 0;
     let mut db_ms = 0.0;
     for s in spans {
-        if s.attributes.get("db.system").is_none() {
+        if s.attributes.get("db.system").is_none() && s.attributes.get("db.system.name").is_none() {
             continue;
         }
         db_calls += 1;

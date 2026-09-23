@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "galileo-django"
-version = "0.2.0"
+version = "0.2.2"
 description = "Galileo observability for Django: code-level traces, identity on every span and log, gateway-aware."
 readme = "README.md"
 requires-python = ">=3.10"

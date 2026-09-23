@@ -12,6 +12,10 @@ Env:
   GALILEO_CAPTURE_HEADERS comma list of request headers to record (default: user-agent,x-tenant-id,x-request-id)
   GALILEO_CAPTURE_USER_EMAIL 1 → user.email on spans
   GALILEO_DISABLED / GALILEO_FORCE
+  GALILEO_SAMPLE_RATIO    0.0–1.0 share of traces kept (default 1); parent-based, so propagated traces stay whole
+  GALILEO_CALL_SITES      0 → skip the per-span stack walk that records code.* (cheapest way to cut CPU)
+  GALILEO_LOGS            0 → do not export log records
+  GALILEO_METRICS_INTERVAL seconds between metric exports (default 60)
 """
 import logging
 import os
@@ -34,6 +38,10 @@ class Settings:
     sql_params: bool = False
     capture_headers: list = field(default_factory=lambda: ['user-agent', 'x-tenant-id', 'x-request-id'])
     capture_user_email: bool = False
+    sample_ratio: float = 1.0
+    call_sites: bool = True
+    export_logs: bool = True
+    metrics_interval: int = 60
 
 
 def settings() -> Settings:
@@ -50,6 +58,13 @@ def _serving() -> bool:
     return any(s in argv0 for s in ('gunicorn', 'uvicorn', 'daphne', 'hypercorn')) or argv1 in ('runserver', 'runserver_plus')
 
 
+def _ratio(v: str) -> float:
+    try:
+        return min(1.0, max(0.0, float(v)))
+    except ValueError:
+        return 1.0
+
+
 def _from_env() -> Settings:
     from django.conf import settings as dj
     service = os.environ.get('OTEL_SERVICE_NAME') or os.environ.get('GALILEO_SERVICE_NAME') or (getattr(dj, 'ROOT_URLCONF', 'django').split('.')[0])
@@ -63,6 +78,10 @@ def _from_env() -> Settings:
         sql_params=os.environ.get('GALILEO_SQL_PARAMS') == '1',
         capture_headers=[h.strip().lower() for h in os.environ.get('GALILEO_CAPTURE_HEADERS', 'user-agent,x-tenant-id,x-request-id').split(',') if h.strip()],
         capture_user_email=os.environ.get('GALILEO_CAPTURE_USER_EMAIL') == '1',
+        sample_ratio=_ratio(os.environ.get('GALILEO_SAMPLE_RATIO', '1')),
+        call_sites=os.environ.get('GALILEO_CALL_SITES', '1') != '0',
+        export_logs=os.environ.get('GALILEO_LOGS', '1') != '0',
+        metrics_interval=int(os.environ.get('GALILEO_METRICS_INTERVAL', '60') or 60),
     )
 
 
@@ -104,8 +123,11 @@ def setup(force: bool = False, exporter=None, log_exporter=None, metric_reader=N
     })
     headers = {'x-galileo-key': cfg.api_key} if cfg.api_key else {}
 
-    provider = TracerProvider(resource=resource)
-    provider.add_span_processor(CallSiteProcessor(cfg.base_dir))
+    from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased, ALWAYS_ON
+    sampler = ALWAYS_ON if cfg.sample_ratio >= 1.0 else ParentBased(TraceIdRatioBased(cfg.sample_ratio))
+    provider = TracerProvider(resource=resource, sampler=sampler)
+    if cfg.call_sites:
+        provider.add_span_processor(CallSiteProcessor(cfg.base_dir))
     if exporter is not None:
         provider.add_span_processor(SimpleSpanProcessor(exporter))
     else:
@@ -117,11 +139,12 @@ def setup(force: bool = False, exporter=None, log_exporter=None, metric_reader=N
     if log_exporter is not None:
         from opentelemetry.sdk._logs.export import SimpleLogRecordProcessor
         log_provider.add_log_record_processor(SimpleLogRecordProcessor(log_exporter))
-    elif exporter is None:
+    elif exporter is None and cfg.export_logs:
         from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
         log_provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(endpoint=f'{cfg.endpoint}/v1/logs', headers=headers)))
-    handler = LoggingHandler(level=logging.INFO, logger_provider=log_provider)
-    logging.getLogger().addHandler(handler)
+    if log_exporter is not None or cfg.export_logs:
+        handler = LoggingHandler(level=logging.INFO, logger_provider=log_provider)
+        logging.getLogger().addHandler(handler)
     logging.getLogger('galileo').setLevel(logging.INFO)
     logging.getLogger('django.request').setLevel(logging.WARNING)
     _logs.install()
@@ -131,7 +154,7 @@ def setup(force: bool = False, exporter=None, log_exporter=None, metric_reader=N
         readers.append(metric_reader)
     elif exporter is None:
         from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
-        readers.append(PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=f'{cfg.endpoint}/v1/metrics', headers=headers), export_interval_millis=15000))
+        readers.append(PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=f'{cfg.endpoint}/v1/metrics', headers=headers), export_interval_millis=cfg.metrics_interval * 1000))
     metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=readers))
     meter = metrics.get_meter('galileo_django')
     _state['histogram'] = meter.create_histogram('http.server.request.duration', unit='ms', description='Request latency')
@@ -144,7 +167,7 @@ def setup(force: bool = False, exporter=None, log_exporter=None, metric_reader=N
 
     DjangoInstrumentor().instrument()
     RequestsInstrumentor().instrument()
-    _db.install(cfg.base_dir)
+    _db.install(cfg.base_dir, call_sites=cfg.call_sites)
     _install_signals()
     if cfg.trace_modules:
         trace_modules(cfg.trace_modules)

@@ -29,6 +29,14 @@ MIDDLEWARE = ['galileo_django.middleware.GalileoContextMiddleware', *MIDDLEWARE,
 | `GALILEO_CAPTURE_USER_EMAIL=1` | also record `user.email` |
 | `GALILEO_FORCE=1` | export from a management command / worker (off by default) |
 | `GALILEO_DISABLED=1` | hard off |
+| `GALILEO_SAMPLE_RATIO` | `0.0`–`1.0` share of traces kept (default `1`). Parent-based: a trace started upstream keeps the upstream decision. Errors inside sampled-out traces are still counted by the SDK's request metrics. |
+| `GALILEO_CALL_SITES=0` | skip the per-span stack walk that records `code.function` / `code.filepath`. The single biggest CPU saver on small hosts; you lose call-site attribution on SQL and HTTP spans. |
+| `GALILEO_LOGS=0` | do not export log records (spans and metrics only) |
+| `GALILEO_METRICS_INTERVAL` | seconds between metric exports (default `60`) |
+
+**Small hosts (1 vCPU).** Set `GALILEO_SAMPLE_RATIO=0.2` and keep the features on: since 0.2.2 a
+sampled-out request costs nothing in the SQL wrapper, so sampling is the lever that matters
+(measured in `docs/overhead.md`). Needs `galileo-django` 0.2.2 or newer.
 
 Nothing is exported under pytest.
 

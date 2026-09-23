@@ -44,7 +44,15 @@ GALILEO_TRACE_MODULES=ai.providers.*,tenant_management.provisioning,notificacoes
 GALILEO_SQL_PARAMS=1
 GALILEO_CAPTURE_USER_EMAIL=0                # keep e-mails out of telemetry in prod
 APP_VERSION=<git tag or sha>                # becomes service.version on every span
+
+# the DigitalOcean droplet has 1 vCPU: sample instead of switching features off
+# (galileo-django >= 0.2.2; measured in docs/overhead.md: ~+10 % CPU at 0.2 with everything on)
+GALILEO_SAMPLE_RATIO=0.2                    # keep 1 in 5 traces; raise toward 0.5 when CPU allows
+GALILEO_METRICS_INTERVAL=60
 ```
+
+`/api/consultas/` runs ~218 SQL statements per request (see Traces → N+1 candidates); every
+one becomes a span, so fixing that query pattern lowers both the app's CPU and Galileo's.
 
 Local development keeps `http://host.docker.internal:4318` and `http://host.docker.internal:8080/gw`
 (see `.env.example`). Only the two URLs, the key and `GALILEO_ENV` differ.
@@ -134,6 +142,23 @@ Why each variable matters:
   cookie stops being sent and the UI needs a same-origin proxy instead.
 - SSO redirect URL: `https://galileo-api.serious-sam.dev/api/auth/oidc/callback`.
 - OTLP gRPC (4317) is not exposed publicly; every SDK here uses OTLP/HTTP.
+
+### Behind a Cloudflare Tunnel
+
+If Cloudflare terminates TLS (Tunnel or proxied DNS), Caddy must not run ACME and the tunnel
+must point **both hostnames at Caddy's port 80**, never at the API or web ports directly:
+the `/otlp/*` route and the acknowledge-link route live in Caddy, so bypassing it turns every
+OTLP request into a 404 from the API. Mount `deploy/Caddyfile.cloudflare` instead of
+`Caddyfile` (plain `http://` site blocks, `auto_https off`) and reload Caddy. Tunnel ingress:
+
+```yaml
+ingress:
+  - hostname: galileo.serious-sam.dev
+    service: http://localhost:80
+  - hostname: galileo-api.serious-sam.dev
+    service: http://localhost:80
+  - service: http_status:404
+```
 
 ### Verifying the host
 

@@ -241,7 +241,7 @@ pub fn trace_summary(t: &galileo_query::trace::TraceView) -> Value {
     let errors: Vec<Value> = t.spans.iter().filter(|s| format!("{:?}", s.span.status.code).to_lowercase() == "error").take(10).map(|s| json!({ "name": s.span.name, "message": s.span.status.message, "exception": s.span.attributes.get("exception.type").map(attr_str), "exception_message": s.span.attributes.get("exception.message").map(attr_str) })).collect();
     let by_kind = {
         let mut m: std::collections::BTreeMap<String, (usize, f64)> = Default::default();
-        for s in &t.spans { let k = if s.span.attributes.contains_key("db.system") { "db" } else if s.span.attributes.contains_key("gen_ai.system") { "llm" } else { "other" }; let e = m.entry(k.into()).or_default(); e.0 += 1; e.1 += s.duration_ms; }
+        for s in &t.spans { let k = if s.span.attributes.contains_key("db.system") || s.span.attributes.contains_key("db.system.name") { "db" } else if s.span.attributes.contains_key("gen_ai.system") { "llm" } else { "other" }; let e = m.entry(k.into()).or_default(); e.0 += 1; e.1 += s.duration_ms; }
         m.into_iter().map(|(k, (n, ms))| json!({ "kind": k, "spans": n, "total_ms": ms.round() })).collect::<Vec<_>>()
     };
     json!({

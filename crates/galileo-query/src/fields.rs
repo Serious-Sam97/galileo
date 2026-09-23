@@ -68,7 +68,7 @@ const SPAN_COLS: &[Col] = &[
     Col { name: "http_route", ty: FieldType::String, aliases: &["http.route"] },
     Col { name: "http_status_code", ty: FieldType::Number, aliases: &["http.response.status_code", "http.status_code"] },
     Col { name: "url_path", ty: FieldType::String, aliases: &["url.path", "http.target"] },
-    Col { name: "db_system", ty: FieldType::String, aliases: &["db.system"] },
+    Col { name: "db_system", ty: FieldType::String, aliases: &["db.system", "db.system.name"] },
     Col { name: "db_operation", ty: FieldType::String, aliases: &["db.operation", "db.operation.name"] },
     Col { name: "db_table", ty: FieldType::String, aliases: &["db.table", "db.collection.name"] },
     Col { name: "user_id", ty: FieldType::String, aliases: &["user.id", "enduser.id"] },

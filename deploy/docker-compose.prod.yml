@@ -8,11 +8,11 @@
 #   GALILEO_PUBLIC_URL     https://galileo.serious-sam.dev      links in notifications, SSO landing
 #   GALILEO_PUBLIC_API     https://galileo-api.serious-sam.dev  baked into the web build
 #   GALILEO_CORS_ORIGINS   ["https://galileo.serious-sam.dev"]  the UI origin calling the API
-# Optional: GALILEO_SMTP_*, GALILEO_OIDC_*.
+# Optional: GALILEO_SMTP_*, GALILEO_OIDC_*, GALILEO_HOST_*_PORT (loopback port remaps).
 #
 # Only Caddy takes public ports (80/443). Everything else is published on loopback for
 # debugging only -- Caddy reaches these services over the compose network, so if a host
-# port collides with another stack on the same machine, set the matching GALILEO_HOST_*
+# port collides with another stack on the same machine, set the matching GALILEO_HOST_*_PORT
 # in deploy/.env; nothing inside the stack depends on the host-side number.
 services:
   caddy:
@@ -34,6 +34,8 @@ services:
       - server
       - web
 
+  # Host-side ports are loopback only (Caddy reaches containers over the compose network).
+  # Remap them in .env when another stack already holds the defaults, e.g. GALILEO_HOST_API_PORT=8084.
   server:
     ports: !override
       - "127.0.0.1:${GALILEO_HOST_API_PORT:-8080}:8080"
