@@ -64,6 +64,7 @@ export default function LogsPage() {
                 {r[ix("tenant_id")] ? <span className="w-10 shrink-0 truncate text-muted" title={`tenant ${r[ix("tenant_id")]}`}>t:{String(r[ix("tenant_id")])}</span> : <span className="w-10 shrink-0" />}
                 {r[ix("code_function")] ? <span className="w-28 shrink-0 truncate text-accent/80" title={String(r[ix("code_function")])}>{String(r[ix("code_function")])}()</span> : null}
                 <span className={clsx("whitespace-pre-wrap break-all", sev === "error" || sev === "fatal" ? "text-err" : "")}>{String(r[ix("body")])}</span>
+                <LogAttrs attrs={r[ix("attrs")]} />
                 {r[ix("trace_id")] ? <Link href={`/p/${pid}/traces/${r[ix("trace_id")]}`} onClick={(e) => e.stopPropagation()} className="ml-auto text-info hover:underline shrink-0">trace</Link> : null}
               </div>
             );
@@ -83,5 +84,39 @@ export default function LogsPage() {
         )}
       </Drawer>
     </div>
+  );
+}
+
+/** Keys that are already columns of the row, or only noise inline. */
+const HIDDEN_ATTRS = new Set(["user.id", "tenant.id", "request_id", "request.id", "code.function.name", "code.namespace", "code.file.path", "code.line.number"]);
+
+/**
+ * What a line says beyond its message. An access-log line (method, path, status) reads as
+ * "GET /api/x → 200 · 3.2 ms"; anything else shows its first attributes as key=value.
+ */
+function LogAttrs({ attrs }: { attrs: unknown }) {
+  if (!attrs || typeof attrs !== "object") return null;
+  const a = attrs as Record<string, unknown>;
+  const str = (k: string) => (a[k] == null || a[k] === "" ? null : String(a[k]));
+  const method = str("method") ?? str("http.request.method") ?? str("http.method");
+  const path = str("path") ?? str("url.path") ?? str("http.route");
+  const status = str("status") ?? str("http.response.status_code") ?? str("http.status_code");
+  if (method && path) {
+    const code = Number(status);
+    const ms = str("ms") ?? str("duration_ms") ?? str("http.response.duration_ms");
+    return (
+      <span className="shrink-0 whitespace-nowrap">
+        <span className="font-semibold text-lilac">{method}</span> <span className="text-fg">{path}</span>
+        {status && <> <span className="text-faint">→</span> <span className={code >= 500 ? "text-err" : code >= 400 ? "text-warn" : "text-ok"}>{status}</span></>}
+        {ms && <span className="text-faint"> · {Number(ms).toFixed(1)} ms</span>}
+      </span>
+    );
+  }
+  const rest = Object.entries(a).filter(([k]) => !HIDDEN_ATTRS.has(k)).slice(0, 5);
+  if (!rest.length) return null;
+  return (
+    <span className="truncate text-faint">
+      {rest.map(([k, v]) => <span key={k} className="mr-2"><span className="text-muted">{k}</span>={typeof v === "string" ? v : JSON.stringify(v)}</span>)}
+    </span>
   );
 }

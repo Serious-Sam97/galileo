@@ -30,18 +30,23 @@ export default function OverviewPage() {
   const toggleHealth = () => setHideStored(hideHealth ? "0" : "1");
 
   const range = { last_seconds: last };
-  const root = { field: "is_root", op: "eq" as const, value: 1 };
-  // Every route with its traffic, latency and error share; also tells which routes are health checks.
-  const routesQ: Query = { dataset: "spans", time_range: range, calculations: [{ op: "COUNT" }, { op: "P95", field: "duration_ms" }, { op: "AVG", field: "is_error" }], filters: [root], breakdowns: ["http_route"], orders: [{ field: "COUNT", direction: "desc" }], limit: 200 };
+  // Requests: root spans a server handled. Jobs and other internal roots are not traffic.
+  const root = [{ field: "is_root", op: "eq" as const, value: 1 }, { field: "kind", op: "eq" as const, value: "server" }];
+  // Every route and method with its traffic, latency and error share. Also tells the noise apart:
+  // health checks (by route) and CORS preflights (OPTIONS, answered before routing, so no route).
+  const routesQ: Query = { dataset: "spans", time_range: range, calculations: [{ op: "COUNT" }, { op: "P95", field: "duration_ms" }, { op: "AVG", field: "is_error" }], filters: root, breakdowns: ["http_route", "http_method"], orders: [{ field: "COUNT", direction: "desc" }], limit: 300 };
   const routes = useRunQuery(routesQ, { refetchInterval: 30_000 });
-  const healthRoutes = useMemo(() => (routes.data?.groups ?? []).map((g) => g.key[0]).filter((r) => r && HEALTH_ROUTE.test(r)), [routes.data]);
-  const healthShare = useMemo(() => {
+  const healthRoutes = useMemo(() => [...new Set((routes.data?.groups ?? []).map((g) => g.key[0]).filter((r) => r && HEALTH_ROUTE.test(r)))], [routes.data]);
+  const isNoise = (g: { key: string[] }) => healthRoutes.includes(g.key[0]) || g.key[1] === "OPTIONS";
+  const noise = useMemo(() => {
     const gs = routes.data?.groups ?? [];
     const total = gs.reduce((a, g) => a + (g.totals[0] ?? 0), 0);
-    const h = gs.filter((g) => healthRoutes.includes(g.key[0])).reduce((a, g) => a + (g.totals[0] ?? 0), 0);
-    return total ? h / total : 0;
-  }, [routes.data, healthRoutes]);
-  const filters = hideHealth && healthRoutes.length ? [root, { field: "http_route", op: "not_in" as const, value: healthRoutes }] : [root];
+    const n = gs.filter(isNoise).reduce((a, g) => a + (g.totals[0] ?? 0), 0);
+    return { any: n > 0, share: total ? n / total : 0 };
+  }, [routes.data, healthRoutes]); // eslint-disable-line react-hooks/exhaustive-deps
+  const filters: Query["filters"] = hideHealth
+    ? [...root, ...(healthRoutes.length ? [{ field: "http_route", op: "not_in" as const, value: healthRoutes }] : []), { field: "http_method", op: "ne" as const, value: "OPTIONS" }]
+    : root;
 
   const kpiQ: Query = { dataset: "spans", time_range: range, calculations: [{ op: "COUNT" }, { op: "AVG", field: "is_error" }, { op: "P95", field: "duration_ms" }], filters, breakdowns: [], orders: [], limit: 1 };
   const kpi = useRunQuery(routes.data ? kpiQ : null, { refetchInterval: 30_000 });
@@ -63,7 +68,7 @@ export default function OverviewPage() {
   const llmCalls = svc.reduce((a, r) => a + r.llm_calls, 0);
   const projectName = svc[0]?.service_name;
 
-  const routeRows = (routes.data?.groups ?? []).filter((g) => !(hideHealth && healthRoutes.includes(g.key[0])));
+  const routeRows = (routes.data?.groups ?? []).filter((g) => !(hideHealth && isNoise(g)));
   const worstRoute = [...routeRows].filter((g) => (g.totals[2] ?? 0) > 0).sort((a, b) => (b.totals[2] ?? 0) - (a.totals[2] ?? 0))[0];
   const slowRow = slowest.data?.raw?.rows[0];
   const slowCols = slowest.data?.raw?.columns ?? [];
@@ -71,7 +76,7 @@ export default function OverviewPage() {
 
   const attention: Attention[] = [];
   if (slow && slow.ms >= 1000) attention.push({ key: "slow", tone: C.warn, icon: Timer, kind: "Slow request", title: `${slow.name} took ${fmtMs(slow.ms)}`, why: "The slowest request in this window. The trace shows which span held it.", cta: "Open trace", href: `/p/${pid}/traces/${slow.trace}` });
-  if (errors > 0) attention.push({ key: "errors", tone: C.err, icon: Flame, kind: "Errors", title: `${fmtNum(errors)} failed request${errors === 1 ? "" : "s"}`, why: worstRoute && (worstRoute.totals[2] ?? 0) > 0 ? `Most on ${worstRoute.key[0] || "(no route)"}: ${((worstRoute.totals[2] ?? 0) * 100).toFixed(1)}% of its requests.` : "Server errors in this window.", cta: "See errors", href: `/p/${pid}/query?q=${encodeQ({ ...routesQ, filters: [...filters, { field: "is_error", op: "eq", value: 1 }], orders: [{ field: "COUNT", direction: "desc" }] })}` });
+  if (errors > 0) attention.push({ key: "errors", tone: C.err, icon: Flame, kind: "Errors", title: `${fmtNum(errors)} failed request${errors === 1 ? "" : "s"}`, why: worstRoute && (worstRoute.totals[2] ?? 0) > 0 ? `Most on ${worstRoute.key[1] ?? ""} ${worstRoute.key[0] || "(no route)"}: ${((worstRoute.totals[2] ?? 0) * 100).toFixed(1)}% of its requests.` : "Server errors in this window.", cta: "See errors", href: `/p/${pid}/query?q=${encodeQ({ ...routesQ, filters: [...filters, { field: "is_error", op: "eq", value: 1 }], orders: [{ field: "COUNT", direction: "desc" }] })}` });
   if (openIssues > 0) attention.push({ key: "issues", tone: C.cyan, icon: Bug, kind: "Issues", title: `${openIssues} open issue${openIssues === 1 ? "" : "s"}`, why: "Repeats are already grouped, so this is the whole list to triage.", cta: "Triage", href: `/p/${pid}/issues` });
   if (nplus.data?.candidates.length) attention.push({ key: "nplus", tone: C.lilac, icon: Database, kind: "Repeated queries", title: `${nplus.data.candidates.length} N+1 pattern${nplus.data.candidates.length === 1 ? "" : "s"}`, why: `Worst: ${nplus.data.candidates[0].avg_repeats}× per request from ${nplus.data.candidates[0].function || "unknown code"}.`, cta: "Open sample", href: `/p/${pid}/traces/${nplus.data.candidates[0].sample_trace}` });
 
@@ -96,8 +101,8 @@ export default function OverviewPage() {
           {!loading && !noData && (
             <p className="max-w-3xl text-[14px] leading-relaxed text-muted">
               {fmtNum(requests)} request{requests === 1 ? "" : "s"}, {errors ? `${fmtNum(errors)} failed` : "none failed"}{p95 != null ? `, p95 ${fmtMs(p95)}` : ""}.
-              {healthRoutes.length > 0 && (
-                <> {hideHealth ? "Health checks" : "Including health checks"} ({Math.round(healthShare * 100)}% of traffic){hideHealth ? " are hidden." : "."}{" "}
+              {noise.any && (
+                <> {hideHealth ? "Health checks and CORS preflights" : "Including health checks and CORS preflights"} ({Math.round(noise.share * 100)}% of traffic){hideHealth ? " are hidden." : "."}{" "}
                   <button onClick={toggleHealth} className="text-lilac underline decoration-dotted underline-offset-4 hover:text-fg">{hideHealth ? "Show them" : "Hide them"}</button></>
               )}
             </p>
@@ -126,7 +131,7 @@ export default function OverviewPage() {
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {loading ? [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[104px]" />) : <>
-          <Stat label={t("Requests")} value={fmtNum(requests)} sub={hideHealth && healthRoutes.length ? "health checks hidden" : "root spans"} spark={series(0)} sparkColor={C.accent} />
+          <Stat label={t("Requests")} value={fmtNum(requests)} sub={hideHealth && noise.any ? "health checks and preflights hidden" : "root spans"} spark={series(0)} sparkColor={C.accent} />
           <Stat label={t("Error rate")} value={requests ? (errRate * 100).toFixed(2) + "%" : "–"} tone={errRate > 0.05 ? "err" : undefined} sub={`${fmtNum(errors)} failed`} spark={series(1)} sparkColor={C.err} />
           <Stat label={t("p95 latency")} value={p95 != null ? fmtMs(p95) : "–"} sub="per bucket below" spark={series(2)} sparkColor={C.lilac} />
           {llmCalls > 0
@@ -200,13 +205,18 @@ function RouteTable({ rows, pid }: { rows: QueryResponse["groups"]; pid: string 
         </thead>
         <tbody>
           {rows.map((g) => {
-            const route = g.key[0] || "(no route)";
+            const [route, method] = [g.key[0] ?? "", g.key[1] ?? ""];
             const p95 = g.totals[1] ?? 0;
             const err = g.totals[2] ?? 0;
-            const href = `/p/${pid}/traces?route=${encodeURIComponent(g.key[0] ?? "")}`;
+            const href = `/p/${pid}/traces?${route ? `route=${encodeURIComponent(route)}` : "noroute=1"}${method ? `&method=${encodeURIComponent(method)}` : ""}`;
             return (
-              <tr key={route} className="border-t border-border/60 hover:bg-panel-2/60">
-                <td className="py-2.5 pr-3"><Link href={href} className="font-mono text-[12.5px] hover:text-accent">{route}</Link></td>
+              <tr key={`${method} ${route}`} className="border-t border-border/60 hover:bg-panel-2/60">
+                <td className="py-2.5 pr-3">
+                  <Link href={href} className="group inline-flex items-baseline gap-2 font-mono text-[12.5px]" title={route ? undefined : "Requests no route matched: 404s, and requests answered by middleware before routing"}>
+                    <span className="w-14 shrink-0 text-[11px] font-semibold text-lilac">{method}</span>
+                    <span className={clsx("group-hover:text-accent", !route && "italic text-muted")}>{route || "(no route)"}</span>
+                  </Link>
+                </td>
                 <td className="py-2.5 text-right tabular-nums">{fmtNum(g.totals[0] ?? 0)}</td>
                 <td className={clsx("py-2.5 text-right tabular-nums", err > 0 ? "text-err" : "text-faint")}>{err > 0 ? `${(err * 100).toFixed(1)}%` : "0"}</td>
                 <td className="py-2.5 text-right font-mono tabular-nums">{fmtMs(p95)}</td>

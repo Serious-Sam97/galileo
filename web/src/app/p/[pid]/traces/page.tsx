@@ -19,6 +19,9 @@ export default function TracesPage() {
   const [last] = useLastSeconds();
   const [service, setService] = useState("");
   const [route, setRoute] = useState(params.get("route") ?? "");
+  // From the Overview's "(no route)" rows: requests nothing matched, optionally of one method.
+  const noRoute = params.get("noroute") === "1";
+  const method = params.get("method") ?? "";
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
   const [minMs, setMinMs] = useState("");
@@ -30,10 +33,12 @@ export default function TracesPage() {
     const q: Query = { dataset: "spans", time_range: { last_seconds: last }, calculations: [], filters: [], breakdowns: [], orders: [], limit: 100, search: search || undefined };
     if (service) q.filters.push({ field: "service.name", op: "eq", value: service });
     if (route) q.filters.push({ field: "http_route", op: "eq", value: route });
+    else if (noRoute) q.filters.push({ field: "http_route", op: "eq", value: "" });
+    if (method) q.filters.push({ field: "http_method", op: "eq", value: method });
     if (status) q.filters.push({ field: "status_code", op: "eq", value: status });
     if (minMs) q.filters.push({ field: "duration_ms", op: "gte", value: Number(minMs) });
     return q;
-  }, [last, search, service, route, status, minMs]);
+  }, [last, search, service, route, noRoute, method, status, minMs]);
   const run = () => mutate(build());
   // Re-run when the window changes (top bar); text filters run on Enter or Search.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -46,7 +51,7 @@ export default function TracesPage() {
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-4">
-      <PageHeader title={t("Traces")} sub={`Root spans · ${fmtDuration(last)} · slowest stand out`} actions={
+      <PageHeader title={t("Traces")} sub={`Root spans · ${fmtDuration(last)}${method ? ` · ${method}` : ""}${noRoute && !route ? " · no route matched" : ""}`} actions={
         <form className="flex gap-1" onSubmit={(e) => { e.preventDefault(); if (traceId.trim()) window.location.href = `/p/${pid}/traces/${traceId.trim()}`; }}>
           <Input className="w-72 font-mono" placeholder="jump to trace id" aria-label="Trace id" value={traceId} onChange={(e) => setTraceId(e.target.value)} />
         </form>
