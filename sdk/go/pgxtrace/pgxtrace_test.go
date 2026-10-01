@@ -5,7 +5,10 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	galileo "github.com/Serious-Sam97/galileo/sdk/go"
@@ -50,4 +53,34 @@ func TestAFailedStatementIsAnError(t *testing.T) {
 	child := rec.Ended()[0]
 	require.Equal(t, "INSERT pets", child.Name())
 	require.Len(t, child.Events(), 1)
+}
+
+func TestStatementsAreTimedWithoutASpanAndThePoolIsReported(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	tel, err := galileo.Init(context.Background(), galileo.Config{Metrics: true, MetricReader: reader})
+	require.NoError(t, err)
+	defer func() { _ = tel.Shutdown(context.Background()) }()
+
+	tr := pgxtrace.New()
+	qctx := tr.TraceQueryStart(context.Background(), nil, pgx.TraceQueryStartData{SQL: "select * from consultas"})
+	tr.TraceQueryEnd(qctx, nil, pgx.TraceQueryEndData{})
+
+	// no connection is opened until the pool is used
+	pool, err := pgxpool.New(context.Background(), "postgres://u:p@127.0.0.1:1/melea?pool_max_conns=4")
+	require.NoError(t, err)
+	defer pool.Close()
+	require.NoError(t, pgxtrace.RecordPoolStats(pool))
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	got := map[string]metricdata.Metrics{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			got[m.Name] = m
+		}
+	}
+	require.Len(t, got[galileo.MetricDBDuration].Data.(metricdata.Histogram[float64]).DataPoints, 1)
+	limit := got["db.client.connection.max"].Data.(metricdata.Sum[int64]).DataPoints
+	require.Equal(t, int64(4), limit[0].Value)
+	require.Len(t, got["db.client.connection.count"].Data.(metricdata.Sum[int64]).DataPoints, 2)
 }

@@ -19,14 +19,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
@@ -61,6 +65,18 @@ type Config struct {
 	// SpanProcessor replaces the OTLP exporter; tests pass a tracetest.SpanRecorder here. When
 	// set, Endpoint may be empty.
 	SpanProcessor sdktrace.SpanProcessor
+	// Logs exports log records written through [Telemetry.SlogHandler] (default true).
+	Logs bool
+	// LogLevel is the lowest level sent to Galileo (default Info); the local handler keeps its own.
+	LogLevel slog.Level
+	// LogProcessor replaces the OTLP log exporter, as SpanProcessor does for spans.
+	LogProcessor sdklog.Processor
+	// Metrics exports request, database, job, runtime and host metrics (default true).
+	Metrics bool
+	// MetricsInterval is the time between metric exports (default 60s).
+	MetricsInterval time.Duration
+	// MetricReader replaces the OTLP metric exporter; tests pass a sdkmetric.ManualReader.
+	MetricReader sdkmetric.Reader
 }
 
 // ConfigFromEnv reads the variables every Galileo SDK understands:
@@ -70,10 +86,20 @@ type Config struct {
 //	OTEL_SERVICE_NAME (or GALILEO_SERVICE_NAME)
 //	GALILEO_ENV, GALILEO_RELEASE (or APP_VERSION)
 //	GALILEO_SAMPLE_RATIO, GALILEO_CALL_SITES=0 to disable call sites
+//	GALILEO_LOGS=0 to keep logs local, GALILEO_LOG_LEVEL (debug, info, warn, error)
+//	GALILEO_METRICS=0 to send no metrics, GALILEO_METRICS_INTERVAL (seconds, default 60)
 func ConfigFromEnv() Config {
 	ratio, err := strconv.ParseFloat(os.Getenv("GALILEO_SAMPLE_RATIO"), 64)
 	if err != nil {
 		ratio = 1
+	}
+	var level slog.Level // info
+	if v := os.Getenv("GALILEO_LOG_LEVEL"); v != "" {
+		_ = level.UnmarshalText([]byte(v))
+	}
+	interval := 60 * time.Second
+	if n, err := strconv.Atoi(os.Getenv("GALILEO_METRICS_INTERVAL")); err == nil && n > 0 {
+		interval = time.Duration(n) * time.Second
 	}
 	return Config{
 		Endpoint:    firstEnv("GALILEO_ENDPOINT", "GALILEO_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"),
@@ -83,6 +109,11 @@ func ConfigFromEnv() Config {
 		Release:     firstEnv("GALILEO_RELEASE", "APP_VERSION"),
 		SampleRatio: ratio,
 		CallSites:   os.Getenv("GALILEO_CALL_SITES") != "0",
+		Logs:        os.Getenv("GALILEO_LOGS") != "0",
+		LogLevel:    level,
+		Metrics:     os.Getenv("GALILEO_METRICS") != "0",
+
+		MetricsInterval: interval,
 	}
 }
 
@@ -95,9 +126,12 @@ func firstEnv(keys ...string) string {
 	return ""
 }
 
-// Telemetry owns the tracer provider built by [Init].
+// Telemetry owns the tracer, logger and meter providers built by [Init].
 type Telemetry struct {
 	provider *sdktrace.TracerProvider
+	logs     *sdklog.LoggerProvider
+	metrics  *sdkmetric.MeterProvider
+	inst     *instruments
 	tracer   trace.Tracer
 	cfg      Config
 }
@@ -138,6 +172,16 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		otel.SetTracerProvider(t.provider)
 	}
 	t.tracer = otel.Tracer(ScopeName, trace.WithInstrumentationVersion(Version))
+	logs, err := newLoggerProvider(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	t.logs = logs
+	metrics, err := newMeterProvider(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	t.metrics, t.inst = metrics, active.Load()
 	return t, nil
 }
 
@@ -183,12 +227,24 @@ func (t *Telemetry) Tracer() trace.Tracer {
 // Enabled reports whether spans are being recorded and exported.
 func (t *Telemetry) Enabled() bool { return t != nil && t.provider != nil }
 
-// Shutdown flushes buffered spans. Call it on exit, with a deadline. Safe on a no-op Telemetry.
+// Shutdown flushes buffered spans, logs and metrics. Call it on exit, with a deadline. Safe on a no-op
+// Telemetry.
 func (t *Telemetry) Shutdown(ctx context.Context) error {
-	if t == nil || t.provider == nil {
+	if t == nil {
 		return nil
 	}
-	return errors.Join(t.provider.ForceFlush(ctx), t.provider.Shutdown(ctx))
+	var errs []error
+	if t.provider != nil {
+		errs = append(errs, t.provider.ForceFlush(ctx), t.provider.Shutdown(ctx))
+	}
+	if t.logs != nil {
+		errs = append(errs, t.logs.ForceFlush(ctx), t.logs.Shutdown(ctx))
+	}
+	if t.metrics != nil {
+		active.CompareAndSwap(t.inst, nil)
+		errs = append(errs, t.metrics.ForceFlush(ctx), t.metrics.Shutdown(ctx))
+	}
+	return errors.Join(errs...)
 }
 
 // Tracer returns the global tracer under the SDK's scope, for code that has no *Telemetry.

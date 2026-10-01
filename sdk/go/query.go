@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -40,41 +41,66 @@ func Table(sql string) string {
 //	rows, err := db.QueryContext(ctx, q, args...)
 //	galileo.EndQuery(span, err)
 //
-// Returns a non-recording span (and does no work) when ctx has no recording span.
+// The statement is also timed in db.client.operation.duration (system, operation, table) when
+// metrics are on, even when ctx has no recording span; with neither, it does no work and returns
+// a span whose End is a no-op.
 func StartQuery(ctx context.Context, system, sql string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
-	if !trace.SpanFromContext(ctx).IsRecording() {
+	recording, metrics := trace.SpanFromContext(ctx).IsRecording(), MetricsEnabled()
+	if !recording && !metrics {
 		return ctx, trace.SpanFromContext(ctx)
 	}
 	sql = strings.TrimSpace(sql)
 	op, table := Operation(sql), Table(sql)
-	name := op
-	all := []attribute.KeyValue{
-		attribute.String("db.system", system),
+	shape := []attribute.KeyValue{
 		attribute.String("db.system.name", system),
-		attribute.String("db.query.text", truncate(sql, MaxStatement)),
 		attribute.String("db.operation.name", op),
 	}
 	if table != "" {
-		name = op + " " + table
-		all = append(all, attribute.String("db.collection.name", table))
+		shape = append(shape, attribute.String("db.collection.name", table))
 	}
-	all = append(all, CallSite()...)
-	return Tracer().Start(ctx, name, trace.WithSpanKind(trace.SpanKindClient), trace.WithAttributes(append(all, attrs...)...))
+	span := trace.SpanFromContext(context.Background()) // no-op: never end the caller's span
+	if recording {
+		name := op
+		if table != "" {
+			name = op + " " + table
+		}
+		all := append([]attribute.KeyValue{
+			attribute.String("db.system", system),
+			attribute.String("db.query.text", truncate(sql, MaxStatement)),
+		}, shape...)
+		all = append(all, CallSite()...)
+		ctx, span = Tracer().Start(ctx, name, trace.WithSpanKind(trace.SpanKindClient), trace.WithAttributes(append(all, attrs...)...))
+	}
+	if !metrics {
+		return ctx, span
+	}
+	return ctx, &timedSpan{Span: span, start: time.Now(), attrs: shape}
+}
+
+// timedSpan carries what EndQuery needs to record the statement's duration.
+type timedSpan struct {
+	trace.Span
+	start time.Time
+	attrs []attribute.KeyValue
 }
 
 // EndQuery ends a span from [StartQuery], recording err unless ignore(err) says it is an
 // answer rather than a failure (e.g. "no rows").
 func EndQuery(span trace.Span, err error, ignore ...func(error) bool) {
 	if err != nil {
-		failed := true
 		for _, f := range ignore {
 			if f(err) {
-				failed = false
+				err = nil
+				break
 			}
 		}
-		if failed {
-			RecordError(trace.ContextWithSpan(context.Background(), span), err)
-		}
+	}
+	if ts, ok := span.(*timedSpan); ok {
+		RecordDBOperation(context.Background(), time.Since(ts.start), err, ts.attrs...)
+		span = ts.Span
+	}
+	if err != nil && span.IsRecording() {
+		RecordError(trace.ContextWithSpan(context.Background(), span), err)
 	}
 	span.End()
 }

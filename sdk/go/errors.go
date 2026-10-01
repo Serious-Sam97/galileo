@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"reflect"
 	"runtime/debug"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -66,7 +68,7 @@ func errorType(err error) string {
 // Job runs fn inside a span for work that has no HTTP request — queue consumers, cron jobs,
 // per-tenant loops — so its SQL and cache spans hang together instead of arriving as loose
 // single-span traces. An error or a panic marks the span failed and is recorded; the panic is
-// re-raised.
+// re-raised. Every run is timed in job.duration (job.name, error.type on failure), sampled or not.
 //
 //	err := galileo.Job(ctx, "send-reminders", func(ctx context.Context) error { … },
 //		attribute.String("tenant.id", clinic))
@@ -74,10 +76,20 @@ func Job(ctx context.Context, name string, fn func(context.Context) error, attrs
 	ctx, span := Tracer().Start(ctx, "job "+name,
 		trace.WithSpanKind(trace.SpanKindConsumer),
 		trace.WithAttributes(append([]attribute.KeyValue{attribute.String("job.name", name)}, attrs...)...))
+	start := time.Now()
 	defer func() {
 		p := recover()
 		if p != nil {
 			RecordPanic(ctx, p)
+		}
+		if in := active.Load(); in != nil {
+			mattrs := []attribute.KeyValue{attribute.String("job.name", name)}
+			if p != nil {
+				mattrs = append(mattrs, attribute.String("error.type", "panic"))
+			} else if err != nil {
+				mattrs = append(mattrs, attribute.String("error.type", errorType(err)))
+			}
+			in.jobDuration.Record(ctx, ms(time.Since(start)), metric.WithAttributes(mattrs...))
 		}
 		// End before re-panicking, or End records the panic a second time (see Middleware).
 		span.End()

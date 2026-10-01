@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
@@ -282,4 +284,20 @@ func TestConfigFromEnv(t *testing.T) {
 	require.Equal(t, "1.4.2", c.Release)
 	require.InDelta(t, 0.2, c.SampleRatio, 1e-9)
 	require.True(t, c.CallSites)
+	require.True(t, c.Logs)
+	require.Equal(t, slog.LevelInfo, c.LogLevel)
+	require.True(t, c.Metrics)
+	require.Equal(t, time.Minute, c.MetricsInterval)
+
+	t.Setenv("GALILEO_LOGS", "0")
+	t.Setenv("GALILEO_LOG_LEVEL", "warn")
+	c = galileo.ConfigFromEnv()
+	require.False(t, c.Logs)
+	require.Equal(t, slog.LevelWarn, c.LogLevel)
+
+	t.Setenv("GALILEO_METRICS", "0")
+	t.Setenv("GALILEO_METRICS_INTERVAL", "15")
+	c = galileo.ConfigFromEnv()
+	require.False(t, c.Metrics)
+	require.Equal(t, 15*time.Second, c.MetricsInterval)
 }

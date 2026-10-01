@@ -1,14 +1,17 @@
 package galileo
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -53,6 +56,9 @@ func WithCapturedHeaders(names ...string) MiddlewareOption {
 // The span continues an incoming traceparent (browser, other services), is renamed to the route
 // template once routing is done ("GET /orders/{id}", so a thousand visits are one row), carries
 // http.* attributes and an error status on 5xx, and the response gets x-galileo-trace-id.
+//
+// Every request, sampled or not, is also counted in http.server.request.duration,
+// http.server.requests and http.server.active_requests (route, method, status, tenant.id).
 func (t *Telemetry) Middleware(opts ...MiddlewareOption) func(http.Handler) http.Handler {
 	cfg := middlewareConfig{route: stdlibPattern, headers: []string{"x-tenant-id", "x-request-id"}}
 	for _, o := range opts {
@@ -70,27 +76,31 @@ func (t *Telemetry) Middleware(opts ...MiddlewareOption) func(http.Handler) http
 					attribute.String("user_agent.original", r.UserAgent()),
 				))
 			defer span.End()
-			if !span.IsRecording() {
+			recording, in := span.IsRecording(), active.Load()
+			if !recording && in == nil {
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
-			for _, h := range cfg.headers {
-				if v := r.Header.Get(h); v != "" {
-					span.SetAttributes(attribute.String("http.request.header."+strings.ToLower(h), v))
-				}
+			var who *Identity
+			if in != nil {
+				who = new(Identity)
+				ctx = context.WithValue(ctx, identitySlotKey{}, who)
+				in.serverActive.Add(ctx, 1, metric.WithAttributes(attribute.String("http.method", r.Method)))
 			}
-			w.Header().Set("x-galileo-trace-id", span.SpanContext().TraceID().String())
+			start := time.Now()
+			if recording {
+				for _, h := range cfg.headers {
+					if v := r.Header.Get(h); v != "" {
+						span.SetAttributes(attribute.String("http.request.header."+strings.ToLower(h), v))
+					}
+				}
+				w.Header().Set("x-galileo-trace-id", span.SpanContext().TraceID().String())
+			}
 			rec := &statusRecorder{ResponseWriter: w}
 			inner := r.WithContext(ctx)
 
 			defer func() {
-				if pattern := cfg.route(inner); pattern != "" {
-					span.SetName(r.Method + " " + pattern)
-					span.SetAttributes(attribute.String("http.route", pattern))
-				}
-				if id := w.Header().Get("X-Request-ID"); id != "" {
-					span.SetAttributes(attribute.String("request.id", id))
-				}
+				pattern := cfg.route(inner)
 				status := rec.status
 				p := recover()
 				if p != nil {
@@ -100,6 +110,22 @@ func (t *Telemetry) Middleware(opts ...MiddlewareOption) func(http.Handler) http
 				}
 				if status == 0 {
 					status = http.StatusOK
+				}
+				if in != nil {
+					in.recordServer(ctx, r.Method, pattern, status, who, time.Since(start))
+				}
+				if !recording {
+					if p != nil {
+						panic(p)
+					}
+					return
+				}
+				if pattern != "" {
+					span.SetName(r.Method + " " + pattern)
+					span.SetAttributes(attribute.String("http.route", pattern))
+				}
+				if id := w.Header().Get("X-Request-ID"); id != "" {
+					span.SetAttributes(attribute.String("request.id", id))
 				}
 				// Both spellings: current semantic conventions and the legacy one older
 				// dashboards key on.
@@ -122,6 +148,23 @@ func (t *Telemetry) Middleware(opts ...MiddlewareOption) func(http.Handler) http
 			next.ServeHTTP(rec, inner)
 		})
 	}
+}
+
+// recordServer counts one request. Same attribute names as galileo-django's request metrics;
+// unmatched routes (404 scans) get no http.route rather than one series per probed path.
+func (in *instruments) recordServer(ctx context.Context, method, route string, status int, who *Identity, d time.Duration) {
+	in.serverActive.Add(ctx, -1, metric.WithAttributes(attribute.String("http.method", method)))
+	attrs := make([]attribute.KeyValue, 0, 4)
+	attrs = append(attrs, attribute.String("http.method", method), attribute.Int("http.status_code", status))
+	if route != "" {
+		attrs = append(attrs, attribute.String("http.route", route))
+	}
+	if who != nil && who.TenantID != "" {
+		attrs = append(attrs, attribute.String("tenant.id", who.TenantID))
+	}
+	opt := metric.WithAttributes(attrs...)
+	in.serverDuration.Record(ctx, ms(d), opt)
+	in.serverRequests.Add(ctx, 1, opt)
 }
 
 // stdlibPattern is the pattern net/http's ServeMux matched ("GET /orders/{id}" → "/orders/{id}").
@@ -174,6 +217,7 @@ func (s *statusRecorder) Flush() {
 //	client := &http.Client{Transport: galileo.Transport(nil)}
 //
 // Always pass the request context (http.NewRequestWithContext), or the call starts a new trace.
+// Each call is also timed in http.client.request.duration (method, server.address, status).
 func Transport(base http.RoundTripper) http.RoundTripper {
 	if base == nil {
 		base = http.DefaultTransport
@@ -194,7 +238,17 @@ func (rt roundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 	defer span.End()
 	r = r.Clone(ctx)
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(r.Header))
+	start := time.Now()
 	resp, err := rt.base.RoundTrip(r)
+	if in := active.Load(); in != nil {
+		attrs := []attribute.KeyValue{attribute.String("http.method", r.Method), attribute.String("server.address", r.URL.Hostname())}
+		if err != nil {
+			attrs = append(attrs, attribute.String("error.type", errorType(err)))
+		} else {
+			attrs = append(attrs, attribute.Int("http.status_code", resp.StatusCode))
+		}
+		in.clientDuration.Record(ctx, ms(time.Since(start)), metric.WithAttributes(attrs...))
+	}
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())

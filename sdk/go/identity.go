@@ -25,12 +25,19 @@ type Identity struct {
 
 type identityKey struct{}
 
+// identitySlotKey holds a *Identity the HTTP middleware reads after the handler ran: identity is
+// resolved on an inner context, but the request metric is recorded by the outer middleware.
+type identitySlotKey struct{}
+
 // WithIdentity stores id in the context and puts it on the span already open there (usually the
 // request span, opened before authentication ran). Every span started from the returned context
 // — SQL, cache, your own — carries it too.
 func WithIdentity(ctx context.Context, id Identity) context.Context {
 	if span := trace.SpanFromContext(ctx); span.IsRecording() {
 		span.SetAttributes(id.attributes()...)
+	}
+	if slot, ok := ctx.Value(identitySlotKey{}).(*Identity); ok {
+		*slot = id
 	}
 	return context.WithValue(ctx, identityKey{}, id)
 }
