@@ -17,7 +17,7 @@ export function BubbleUpBar({ defaultField, onSelect }: { defaultField: string; 
   const [op, setOp] = useState<Filter["op"]>("gt");
   const [value, setValue] = useState("");
   return (
-    <form className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-panel px-3 py-2 text-xs" onSubmit={(e) => { e.preventDefault(); if (field) onSelect({ field, op, value: parseValue(value, op) }); }}>
+    <form className="flex flex-wrap items-center gap-1.5 rounded-xl border bg-panel/80 px-3 py-2 text-xs" onSubmit={(e) => { e.preventDefault(); if (field) onSelect({ field, op, value: parseValue(value, op) }); }}>
       <span className="text-muted mr-1">BubbleUp: compare events where</span>
       <Input className="w-40 font-mono" value={field} onChange={(e) => setField(e.target.value)} placeholder="duration_ms" />
       <Select value={op} onChange={(e) => setOp(e.target.value as Filter["op"])}>{FILTER_OPS.filter((o) => o.needsValue).map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}</Select>

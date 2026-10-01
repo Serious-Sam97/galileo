@@ -2,12 +2,12 @@
 
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { useState } from "react";
 import clsx from "clsx";
 import { useProjectId, useProjectQuery } from "@/lib/hooks";
 import type { SessionRow } from "@/lib/types";
-import { Badge, Empty, ErrorBox, Select, Stat, Card } from "@/components/ui";
+import { Badge, Empty, ErrorBox, Stat, Card, PageHeader } from "@/components/ui";
 import { ago, fmtMs, fmtNum, fmtTime, fmtUsd } from "@/lib/format";
+import { useLastSeconds } from "@/lib/time-range";
 
 interface Ev { timestamp: string; kind: "request" | "log"; name: string; route: string; status: number; status_code: string; duration_ms: number; trace_id: string; tenant_id: string; service_name: string; body: string; severity: string; model: string; cost_usd: number }
 interface Summary { requests: number; errors: number; llm_calls: number; llm_cost_usd: number; tenants: number; main_tenant: string; first_seen: string; last_seen: string; routes: number }
@@ -17,17 +17,13 @@ const SEV: Record<string, "err" | "warn" | "ok" | "muted"> = { fatal: "err", err
 export default function UserPage() {
   const { userId } = useParams<{ userId: string }>();
   const pid = useProjectId();
-  const [last, setLast] = useState(86400);
+  const [last] = useLastSeconds();
   const q = useProjectQuery<{ summary: Summary | null; events: Ev[] }>(["user-timeline", userId, last], `/users/${encodeURIComponent(userId)}/timeline?last_seconds=${last}`);
   const s = q.data?.summary;
   const sessions = useProjectQuery<{ sessions: SessionRow[] }>(["sessions", last, userId], `/sessions?last_seconds=${last}&user_id=${encodeURIComponent(userId)}&limit=50`);
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-3">
-        <h1 className="text-base font-semibold">User <span className="font-mono">{userId}</span></h1>
-        {s?.main_tenant && <Badge>tenant {s.main_tenant}{s.tenants > 1 ? ` +${s.tenants - 1}` : ""}</Badge>}
-        <div className="ml-auto"><Select value={last} onChange={(e) => setLast(Number(e.target.value))}>{[3600, 86400, 7 * 86400, 30 * 86400].map((x) => <option key={x} value={x}>Last {x >= 86400 ? x / 86400 + "d" : x / 3600 + "h"}</option>)}</Select></div>
-      </div>
+    <div className="mx-auto max-w-[1400px] space-y-4">
+      <PageHeader title={<>User <span className="font-mono">{userId}</span></>} sub={s?.main_tenant ? <>tenant {s.main_tenant}{s.tenants > 1 ? ` +${s.tenants - 1}` : ""}</> : "Everything this user did in the window"} />
       <ErrorBox error={q.error} />
       {sessions.data && sessions.data.sessions.length > 0 && (
         <Card title={`Browser sessions (${sessions.data.sessions.length})`}>

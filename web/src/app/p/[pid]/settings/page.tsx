@@ -4,7 +4,7 @@ import { useState } from "react";
 import clsx from "clsx";
 import { useProjectId, useProjectQuery, useProjectMutation, useMe } from "@/lib/hooks";
 import { post, del, patch } from "@/lib/api";
-import { Button, Card, Table, Th, Td, Empty, Badge, Drawer, ErrorBox, Input, Label, Select, Textarea, Stat } from "@/components/ui";
+import { Button, Card, Table, Th, Td, Empty, Badge, Drawer, ErrorBox, Input, Label, Select, Textarea, Stat, PageHeader, Tabs } from "@/components/ui";
 import type { ApiKey, RedactionRule, Member, Invite, ApiToken, AuditRow, Channel, LogPipeline, LogProcessor, LogMatch, LogMetricRule, UsageRes, MaintenanceWindow, OncallSchedule, Trigger } from "@/lib/types";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { del as apiDel, get as apiGet, patch as apiPatch, post as apiPost, put as apiPut } from "@/lib/api";
@@ -43,10 +43,10 @@ function IssueSettings() {
 export default function SettingsPage() {
   const [tab, setTab] = useState<"keys" | "redaction" | "connect" | "project" | "issues" | "org" | "tokens" | "audit" | "notifications" | "health" | "logs">("keys");
   return (
-    <div className="space-y-3">
-      <div className="flex gap-1 border-b">
-        {(["keys", "connect", "redaction", "logs", "notifications", "issues", "project", "org", "tokens", "audit", "health"] as const).map((t) => <button key={t} onClick={() => setTab(t)} className={clsx("px-3 py-1.5 text-sm capitalize border-b-2 -mb-px", tab === t ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg")}>{t === "keys" ? "API keys" : t === "org" ? "Organization" : t === "tokens" ? "Personal tokens" : t === "health" ? "Galileo health" : t}</button>)}
-      </div>
+    <div className="mx-auto max-w-[1400px] space-y-4">
+      <PageHeader title="Settings" sub="Keys, connections, redaction, notifications and everything else about this project." />
+      <Tabs tabs={["keys", "connect", "redaction", "logs", "notifications", "issues", "project", "org", "tokens", "audit", "health"] as const} value={tab} onChange={setTab}
+        label={(t) => t === "keys" ? "API keys" : t === "org" ? "Organization" : t === "tokens" ? "Personal tokens" : t === "health" ? "Galileo health" : t} />
       {tab === "keys" && <Keys />}
       {tab === "connect" && <Connect />}
       {tab === "redaction" && <Redaction />}

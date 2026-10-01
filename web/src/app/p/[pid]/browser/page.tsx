@@ -3,28 +3,25 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useProjectId, useProjectQuery } from "@/lib/hooks";
-import { Card, Stat, Table, Th, Td, Empty, ErrorBox, Badge, Input, Select } from "@/components/ui";
+import { Card, Stat, Table, Th, Td, Empty, ErrorBox, Badge, Input, PageHeader } from "@/components/ui";
 import { VitalPill, VITAL_LABELS, vitalTone, fmtVital } from "@/components/vitals";
 import { fmtNum, fmtTime, ago } from "@/lib/format";
 import type { SessionRow, VitalsRes } from "@/lib/types";
+import { useLastSeconds } from "@/lib/time-range";
 
 const ORDER = ["lcp", "inp", "cls", "fcp", "ttfb", "fid"];
 
 export default function BrowserPage() {
   const pid = useProjectId();
-  const [last, setLast] = useState(86400);
+  const [last] = useLastSeconds();
   const [user, setUser] = useState("");
   const v = useProjectQuery<VitalsRes>(["rum-vitals", last], `/rum/vitals?last_seconds=${last}`);
   const s = useProjectQuery<{ sessions: SessionRow[] }>(["sessions", last, user], `/sessions?last_seconds=${last}&user_id=${encodeURIComponent(user)}&limit=200`);
   const overall = Object.fromEntries((v.data?.overall ?? []).map((o) => [o.name, o]));
   const noData = v.data && v.data.counts.sessions === 0 && (s.data?.sessions.length ?? 0) === 0;
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <h1 className="text-base font-semibold mr-2">Browser</h1>
-        <Select value={last} onChange={(e) => setLast(Number(e.target.value))}>{[3600, 86400, 7 * 86400, 30 * 86400].map((x) => <option key={x} value={x}>Last {x >= 86400 ? x / 86400 + "d" : x / 3600 + "h"}</option>)}</Select>
-        <Input className="w-56" placeholder="filter sessions by user id" value={user} onChange={(e) => setUser(e.target.value)} />
-      </div>
+    <div className="mx-auto max-w-[1400px] space-y-4">
+      <PageHeader title="Browser" sub="Real-user sessions and Web Vitals from the browser script, joined to the backend traces they caused." actions={<Input className="w-56" placeholder="filter sessions by user id" aria-label="User id" value={user} onChange={(e) => setUser(e.target.value)} />} />
       <ErrorBox error={v.error ?? s.error} />
       {noData && <Empty>No browser data yet. Settings → Connect → Browser shows the one-line script tag; see docs/rum.md.</Empty>}
       {v.data && (

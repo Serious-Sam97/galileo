@@ -64,7 +64,7 @@ export default function WelcomePage() {
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <div>
-        <h1 className="text-lg font-semibold">{t("Get started")}</h1>
+        <h1 className="text-xl font-semibold tracking-tight">{t("Get started")}</h1>
         <p className="text-sm text-muted">Four steps from an empty project to a board with real data.</p>
       </div>
       <ol className="flex gap-2 text-xs">

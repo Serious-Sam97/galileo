@@ -31,10 +31,10 @@ export default function TriggerPage() {
   if (t.error) return <ErrorBox error={t.error} />;
   if (!trig) return <div className="text-muted">Loading…</div>;
   return (
-    <div className="space-y-3">
+    <div className="mx-auto max-w-[1400px] space-y-4">
       <div className="flex items-center gap-3">
         <Link href={`/p/${pid}/triggers`} className="text-muted hover:text-fg text-xs">← triggers</Link>
-        <h1 className="text-base font-semibold">{trig.name}</h1>
+        <h1 className="text-xl font-semibold tracking-tight">{trig.name}</h1>
         <Badge tone={trig.state === "triggered" ? (trig.severity === "warn" ? "warn" : "err") : trig.state === "error" ? "warn" : trig.state === "muted" ? "muted" : "ok"}>{trig.state === "triggered" ? trig.severity : trig.state}</Badge>
         {trig.mute_until && new Date(trig.mute_until) > new Date() && <Badge>muted until {fmtTime(trig.mute_until)}</Badge>}
         {trig.mode === "baseline" && <Badge tone="info">baseline ×{trig.baseline_factor}</Badge>}

@@ -4,18 +4,19 @@ import { useState } from "react";
 import clsx from "clsx";
 import Link from "next/link";
 import { useProjectId, useRunQuery } from "@/lib/hooks";
-import { Button, Input, Select, Empty, ErrorBox, Badge, Drawer } from "@/components/ui";
-import { TimeRangePicker } from "@/components/time-range";
+import { Button, Input, Select, Empty, ErrorBox, Badge, Drawer, PageHeader } from "@/components/ui";
 import { SeriesCharts } from "@/components/query/result-charts";
 import type { Query, TimeRange } from "@/lib/types";
 import { fmtTime } from "@/lib/format";
 import { Radio } from "lucide-react";
+import { useLastSeconds } from "@/lib/time-range";
 
 const SEV_TONE: Record<string, "err" | "warn" | "ok" | "muted" | "info"> = { fatal: "err", error: "err", warn: "warn", info: "ok", debug: "muted", trace: "muted" };
 
 export default function LogsPage() {
   const pid = useProjectId();
-  const [range, setRange] = useState<TimeRange>({ last_seconds: 3600 });
+  const [last] = useLastSeconds();
+  const range: TimeRange = { last_seconds: last };
   const [search, setSearch] = useState("");
   const [severity, setSeverity] = useState("");
   const [service, setService] = useState("");
@@ -37,9 +38,9 @@ export default function LogsPage() {
   const ix = (c: string) => cols.indexOf(c);
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-panel p-3">
-        <TimeRangePicker value={range} onChange={setRange} />
+    <div className="mx-auto max-w-[1400px] space-y-4">
+      <PageHeader title="Logs" sub="Log lines from every service, linked to their traces. Use Tail to follow the last five minutes live." />
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-panel/80 p-3">
         <Input className="flex-1 min-w-60" placeholder="search log bodies (all words must match)" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === "Enter" && apply()} />
         <Select value={severity} onChange={(e) => setSeverity(e.target.value)}><option value="">any level</option>{["fatal", "error", "warn", "info", "debug", "trace"].map((s) => <option key={s}>{s}</option>)}</Select>
         <Input className="w-36" placeholder="service" value={service} onChange={(e) => setService(e.target.value)} />
@@ -50,7 +51,7 @@ export default function LogsPage() {
       <ErrorBox error={rows.error} />
       {hist.data && hist.data.groups.length > 0 && <SeriesCharts res={hist.data} />}
       {rows.data?.raw && (rows.data.raw.rows.length === 0 ? <Empty>No log records match.</Empty> : (
-        <div className="rounded-md border overflow-auto scroll-thin max-h-[calc(100vh-380px)] font-mono text-[12px]">
+        <div className="rounded-xl border bg-panel/60 overflow-auto scroll-thin max-h-[calc(100vh-420px)] font-mono text-[12px]">
           {rows.data.raw.rows.map((r, i) => {
             const sev = String(r[ix("severity")]);
             const obj = Object.fromEntries(cols.map((c, j) => [c, r[j]]));

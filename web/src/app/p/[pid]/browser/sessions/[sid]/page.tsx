@@ -28,10 +28,10 @@ export default function SessionPage({ params }: { params: Promise<{ sid: string 
   const first = d?.events[0], last = d?.events[d.events.length - 1];
   const spanMs = first && last ? new Date(last.timestamp).getTime() - new Date(first.timestamp).getTime() : 0;
   return (
-    <div className="space-y-3">
+    <div className="mx-auto max-w-[1400px] space-y-4">
       <div className="flex items-center gap-2 flex-wrap">
         <Link href={`/p/${pid}/browser`} className="text-muted hover:text-fg text-sm">← Browser</Link>
-        <h1 className="text-base font-semibold font-mono">session {sid.slice(0, 8)}…</h1>
+        <h1 className="text-xl font-semibold tracking-tight font-mono">session {sid.slice(0, 8)}…</h1>
         {d?.user_id && <Link href={`/p/${pid}/users/${encodeURIComponent(d.user_id)}`} className="text-info hover:underline text-sm">user {d.user_id}</Link>}
         {first && <span className="text-muted text-xs">{fmtTime(first.timestamp)} · {first.attrs["browser.name"]} · {first.service_name}</span>}
       </div>

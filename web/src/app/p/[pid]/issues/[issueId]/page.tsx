@@ -12,6 +12,7 @@ import { Badge, Button, Card, Drawer, Empty, ErrorBox, Input, Label, Stat, Table
 import { Chart, axisStyle, type EChartsOption } from "@/components/charts/chart";
 import type { Issue } from "@/lib/types";
 import { ago, fmtMs, fmtNum, fmtTime } from "@/lib/format";
+import { C, tooltipStyle } from "@/lib/palette";
 
 interface Detail {
   issue: Issue; events: { id: string; kind: string; at: string; message: string }[]; start: string; end: string; granularity: number;
@@ -46,23 +47,23 @@ export default function IssuePage() {
   const option = useMemo<EChartsOption>(() => {
     if (!d.data) return {};
     return {
-      tooltip: { trigger: "axis", backgroundColor: "#161c29", borderColor: "#232a3a", textStyle: { color: "#e6e9ef", fontSize: 11 } },
+      tooltip: { trigger: "axis", ...tooltipStyle },
       grid: { left: 40, right: 12, top: 12, bottom: 24 },
       xAxis: { type: "time", ...axisStyle },
       yAxis: { type: "value", ...axisStyle, minInterval: 1 },
-      series: [{ type: "bar", name: "occurrences", data: d.data.series.map((p) => [Number(p.ts) * 1000, Number(p.n)]), itemStyle: { color: "#ff5c6c" }, barMaxWidth: 12 }],
+      series: [{ type: "bar", name: "occurrences", data: d.data.series.map((p) => [Number(p.ts) * 1000, Number(p.n)]), itemStyle: { color: C.err }, barMaxWidth: 12 }],
     };
   }, [d.data]);
   if (d.error) return <ErrorBox error={d.error} />;
   if (!d.data) return <div className="text-muted">Loading…</div>;
   const i = d.data.issue;
   return (
-    <div className="space-y-3">
+    <div className="mx-auto max-w-[1400px] space-y-4">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2"><Link href={`/p/${pid}/issues`} className="text-muted hover:text-fg text-xs">← issues</Link>
             <Badge tone={i.status === "open" ? "err" : i.status === "resolved" ? "ok" : "muted"}>{i.status}</Badge>{i.last_version && <Badge>last seen on {i.last_version}</Badge>}</div>
-          <h1 className="mt-1 text-base font-semibold break-words">{i.title}</h1>
+          <h1 className="mt-1 text-xl font-semibold tracking-tight break-words">{i.title}</h1>
           <div className="mt-0.5 flex flex-wrap gap-3 text-[12px] font-mono text-muted"><span className="text-accent">{i.culprit || i.exception_type}</span><span>{i.route}</span><span>{i.service_name}</span></div>
         </div>
         <div className="flex gap-2">

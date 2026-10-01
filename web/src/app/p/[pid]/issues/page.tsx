@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useState } from "react";
 import clsx from "clsx";
 import { useProjectId, useProjectQuery } from "@/lib/hooks";
-import { Badge, Empty, ErrorBox, Input, Select } from "@/components/ui";
+import { Badge, Empty, ErrorBox, Input, Select, PageHeader } from "@/components/ui";
 import type { Issue } from "@/lib/types";
 import { ago, fmtNum } from "@/lib/format";
+import { useLastSeconds } from "@/lib/time-range";
 
 function Spark({ v }: { v: number[] }) {
   const max = Math.max(1, ...v);
@@ -18,22 +19,23 @@ export default function IssuesPage() {
   const [status, setStatus] = useState("open");
   const [sort, setSort] = useState("last_seen");
   const [q, setQ] = useState("");
-  const [last, setLast] = useState(86400);
+  const [last] = useLastSeconds();
   const list = useProjectQuery<{ issues: Issue[]; counts: Record<string, number> }>(["issues", status, sort, q, last], `/issues?status=${status}&sort=${sort}&q=${encodeURIComponent(q)}&last_seconds=${last}`, { refetchInterval: 30_000 });
   const counts = list.data?.counts ?? {};
   return (
-    <div className="space-y-3">
+    <div className="mx-auto max-w-[1400px] space-y-4">
+      <PageHeader title="Issues" sub="Errors grouped by cause: one row per problem, however often it happens." />
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex gap-1 border-b">
+        <div className="flex gap-1 rounded-xl border bg-panel/80 p-1" role="tablist">
           {(["open", "resolved", "ignored", "all"] as const).map((t) => (
-            <button key={t} onClick={() => setStatus(t)} className={clsx("px-3 py-1.5 text-sm capitalize border-b-2 -mb-px", status === t ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg")}>
-              {t}{t !== "all" && counts[t] ? <span className="ml-1 text-[10px] text-muted">{counts[t]}</span> : null}
+            <button key={t} role="tab" aria-selected={status === t} onClick={() => setStatus(t)} className={clsx("rounded-lg px-3 py-1.5 text-[13px] capitalize transition-colors", status === t ? "nav-active font-semibold" : "text-muted hover:text-fg hover:bg-panel-2")}>
+              {t}{t !== "all" && counts[t] ? <span className={clsx("ml-1.5 rounded-full px-1.5 text-[10.5px]", status === t ? "bg-accent/25 text-fg" : "bg-panel-3 text-muted")}>{counts[t]}</span> : null}
             </button>
           ))}
         </div>
         <Input data-page-filter className="w-64" placeholder="search title, culprit, route" value={q} onChange={(e) => setQ(e.target.value)} />
         <Select value={sort} onChange={(e) => setSort(e.target.value)}><option value="last_seen">Last seen</option><option value="count">Most events</option><option value="users">Most users</option><option value="first_seen">Newest</option></Select>
-        <Select value={last} onChange={(e) => setLast(Number(e.target.value))}>{[3600, 86400, 7 * 86400].map((s) => <option key={s} value={s}>{s >= 86400 ? `${s / 86400}d` : `${s / 3600}h`} window</option>)}</Select>
+        
       </div>
       <ErrorBox error={list.error} />
       {list.data && list.data.issues.length === 0 && <Empty>No {status === "all" ? "" : status} issues. Exceptions recorded on request spans are grouped here automatically.</Empty>}

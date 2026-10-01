@@ -9,7 +9,7 @@ import { useProjectId, useRunQuery, useProjectMutation, useProjectQuery } from "
 import { post } from "@/lib/api";
 import { defaultQuery, type Filter, type Query } from "@/lib/types";
 import { decodeQ, encodeQ } from "@/lib/format";
-import { Button, Drawer, ErrorBox, Input, Label, Textarea } from "@/components/ui";
+import { Button, Drawer, ErrorBox, Input, Label, Textarea, PageHeader } from "@/components/ui";
 import { API_BASE, post as apiPost } from "@/lib/api";
 import { Code2, Download, Share2, Terminal, History as HistoryIcon } from "lucide-react";
 import type { QueryHistoryRow, Annotation } from "@/lib/types";
@@ -95,7 +95,8 @@ export default function QueryPage() {
 
   if (!draft || !active) return null;
   return (
-    <div className="space-y-3">
+    <div className="mx-auto max-w-[1400px] space-y-4">
+      <PageHeader title="Query" sub="Ask anything of spans, logs and metrics: count, percentiles, breakdowns, heatmaps." />
       <QueryBuilder query={draft} onChange={setDraft} onRun={run} onSave={() => setSaving(true)} running={res.isFetching} />
       <ErrorBox error={res.error} />
       {res.data && (

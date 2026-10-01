@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useProjectId, useProjectQuery, useProjectMutation } from "@/lib/hooks";
 import { post } from "@/lib/api";
-import { Button, Table, Th, Td, Empty, Badge, Drawer, ErrorBox } from "@/components/ui";
+import { Button, Table, Th, Td, Empty, Badge, Drawer, ErrorBox, PageHeader } from "@/components/ui";
 import { SloForm, emptySlo, type SloDraft } from "./form";
 import type { Slo } from "@/lib/types";
 import { ago } from "@/lib/format";
@@ -19,11 +19,8 @@ export default function SlosPage() {
   const create = useProjectMutation<SloDraft>((p, b) => post(`/api/projects/${p}/slos`, b), [["slos"]]);
   const rows = list.data?.slos ?? [];
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-muted text-sm">An SLO tracks the share of good events over a rolling window against a target, and alerts when the error budget burns too fast.</p>
-        <Button variant="primary" size="sm" onClick={() => setCreating(true)}><Plus size={13} /> SLO</Button>
-      </div>
+    <div className="mx-auto max-w-[1400px] space-y-4">
+      <PageHeader title="SLOs" sub="An SLO tracks the share of good events over a rolling window against a target, and alerts when the error budget burns too fast." actions={<Button variant="primary" onClick={() => setCreating(true)}><Plus size={14} /> New SLO</Button>} />
       <ErrorBox error={list.error} />
       {rows.length === 0 ? <Empty>No SLOs yet.</Empty> : (
         <Table>

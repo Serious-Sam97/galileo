@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "@/lib/api";
 import { Button, ErrorBox, Input, Label } from "@/components/ui";
-import { Telescope } from "lucide-react";
+import { AuthShell } from "@/components/auth-shell";
 
 export default function InvitePage() {
   const { token } = useParams<{ token: string }>();
@@ -25,9 +25,8 @@ export default function InvitePage() {
     } catch (err) { setError(err); } finally { setBusy(false); }
   }
   return (
-    <div className="flex flex-1 items-center justify-center p-6">
-      <form onSubmit={accept} className="w-full max-w-sm rounded-xl border bg-panel p-6 space-y-4">
-        <div className="flex items-center gap-2 text-lg font-semibold"><Telescope className="text-accent" size={22} /> Galileo</div>
+    <AuthShell>
+      <form onSubmit={accept} className="space-y-4">
         {info.error ? <ErrorBox error={info.error} /> : info.data ? (
           <>
             <p className="text-sm">You were invited to <b>{info.data.org}</b> as <b>{info.data.role}</b>, for <span className="font-mono">{info.data.email}</span>.</p>
@@ -40,6 +39,6 @@ export default function InvitePage() {
           </>
         ) : <p className="text-muted text-sm">Checking invite…</p>}
       </form>
-    </div>
+    </AuthShell>
   );
 }

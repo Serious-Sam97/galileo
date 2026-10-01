@@ -18,10 +18,10 @@ export default function AgentRunPage({ params }: { params: Promise<{ cid: string
   const first = d?.turns[0];
   const stalls = (d?.turns ?? []).map((t, i, arr) => i > 0 ? (new Date(t.timestamp).getTime() - new Date(arr[i - 1].timestamp).getTime() - arr[i - 1].duration_ms) : 0);
   return (
-    <div className="space-y-3">
+    <div className="mx-auto max-w-[1400px] space-y-4">
       <div className="flex items-center gap-2 flex-wrap">
         <Link href={`/p/${pid}/ai`} className="text-muted hover:text-fg text-sm">← AI</Link>
-        <h1 className="text-base font-semibold font-mono">run {cid.slice(0, 12)}…</h1>
+        <h1 className="text-xl font-semibold tracking-tight font-mono">run {cid.slice(0, 12)}…</h1>
         {d?.user_id && <Link href={`/p/${pid}/users/${encodeURIComponent(d.user_id)}`} className="text-info hover:underline text-sm">user {d.user_id}</Link>}
         {first && <span className="text-muted text-xs">{fmtTime(first.timestamp)} · {first.route} · {first.model}</span>}
       </div>

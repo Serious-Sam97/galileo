@@ -5,6 +5,7 @@ import { Chart, axisStyle, type EChartsOption } from "@/components/charts/chart"
 import type { QueryResponse, Group, Deploy } from "@/lib/types";
 import { colorFor, fmtNum } from "@/lib/format";
 import { useProjectQuery } from "@/lib/hooks";
+import { C, tooltipStyle } from "@/lib/palette";
 
 /** Deploys inside the chart's range, for vertical markers. */
 export function useDeploys(start: string, end: string): Deploy[] {
@@ -34,8 +35,8 @@ function SeriesChart({ res, ci, label, onBrush, annotations, onPointClick, heigh
   const deploys = useDeploys(res.start, res.end);
   const option = useMemo<EChartsOption>(() => {
     const marks = [
-      ...deploys.map((d) => ({ xAxis: new Date(d.at).getTime(), name: `deploy ${d.version}`, lineStyle: { color: "#c084fc" }, label: { color: "#c084fc" } })),
-      ...(annotations ?? []).map((a) => ({ xAxis: a.ts * 1000, name: `✎ ${a.text.slice(0, 40)}`, lineStyle: { color: "#f5a524" }, label: { color: "#f5a524" } })),
+      ...deploys.map((d) => ({ xAxis: new Date(d.at).getTime(), name: `deploy ${d.version}`, lineStyle: { color: C.lilac }, label: { color: C.lilac } })),
+      ...(annotations ?? []).map((a) => ({ xAxis: a.ts * 1000, name: `✎ ${a.text.slice(0, 40)}`, lineStyle: { color: C.warn }, label: { color: C.warn } })),
     ];
     const markLine = marks.length ? {
       silent: false, symbol: ["none", "none"], lineStyle: { type: "dashed" as const, width: 1 },
@@ -66,12 +67,12 @@ function SeriesChart({ res, ci, label, onBrush, annotations, onPointClick, heigh
       tooltip: { show: true },
     }));
     return {
-      title: { text: label, left: 8, top: 4, textStyle: { fontSize: 12, color: "#e6e9ef", fontWeight: 500 } },
-      tooltip: { trigger: "axis", backgroundColor: "#161c29", borderColor: "#232a3a", textStyle: { color: "#e6e9ef", fontSize: 11 }, valueFormatter: (v) => fmtNum(v as number) },
+      title: { text: label, left: 8, top: 4, textStyle: { fontSize: 12, color: C.fg, fontWeight: 500 } },
+      tooltip: { trigger: "axis", ...tooltipStyle, valueFormatter: (v) => fmtNum(v as number) },
       xAxis: { type: "time", ...axisStyle },
       yAxis: { type: "value", ...axisStyle, axisLabel: { ...axisStyle.axisLabel, formatter: (v: number) => fmtNum(v, 1) } },
-      brush: onBrush ? { toolbox: ["lineX", "clear"], xAxisIndex: 0, brushStyle: { color: "rgba(245,165,36,0.15)", borderColor: "#f5a524" } } : undefined,
-      toolbox: onBrush ? { show: true, right: 8, top: 0, feature: { brush: { type: ["lineX", "clear"], title: { lineX: "Select time range", clear: "Clear" } } }, iconStyle: { borderColor: "#8b93a7" } } : undefined,
+      brush: onBrush ? { toolbox: ["lineX", "clear"], xAxisIndex: 0, brushStyle: { color: "rgba(255,92,207,0.14)", borderColor: C.accent } } : undefined,
+      toolbox: onBrush ? { show: true, right: 8, top: 0, feature: { brush: { type: ["lineX", "clear"], title: { lineX: "Select time range", clear: "Clear" } } }, iconStyle: { borderColor: C.faint } } : undefined,
       series: [...series, ...ghosts],
     };
   }, [res, ci, label, onBrush, deploys, annotations]);
@@ -95,9 +96,9 @@ export function HeatmapChart({ res, onBrush }: { res: QueryResponse; onBrush?: (
     hm.counts.forEach((row, bi) => row.forEach((c, vi) => c > 0 && data.push([bi, vi, c])));
     const yLabels = hm.bin_edges.map((e) => fmtNum(e, 1));
     return {
-      title: { text: `HEATMAP(${hm.field}) — ${hm.total} events${hm.log_scale ? ", log scale" : ""}`, left: 8, top: 4, textStyle: { fontSize: 12, color: "#e6e9ef", fontWeight: 500 } },
+      title: { text: `HEATMAP(${hm.field}) — ${hm.total} events${hm.log_scale ? ", log scale" : ""}`, left: 8, top: 4, textStyle: { fontSize: 12, color: C.fg, fontWeight: 500 } },
       tooltip: {
-        backgroundColor: "#161c29", borderColor: "#232a3a", textStyle: { color: "#e6e9ef", fontSize: 11 },
+        ...tooltipStyle,
         formatter: (p: unknown) => {
           const v = (p as { value: [number, number, number] }).value;
           const lo = hm.bin_edges[v[1]]; const hi = hm.bin_edges[v[1] + 1];
@@ -107,10 +108,10 @@ export function HeatmapChart({ res, onBrush }: { res: QueryResponse; onBrush?: (
       grid: { left: 56, right: 16, top: 28, bottom: 28 },
       xAxis: { type: "category", data: hm.buckets.map((b) => new Date(b * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })), ...axisStyle, splitLine: { show: false } },
       yAxis: { type: "category", data: yLabels, ...axisStyle, splitLine: { show: false } },
-      visualMap: { min: 0, max: Math.max(1, hm.max_count), show: false, inRange: { color: ["#1a2030", "#3a3f6b", "#5b9cff", "#f5a524", "#ff5c6c"] } },
-      brush: onBrush ? { toolbox: ["rect", "clear"], xAxisIndex: 0, yAxisIndex: 0, brushStyle: { color: "rgba(245,165,36,0.2)", borderColor: "#f5a524" } } : undefined,
-      toolbox: onBrush ? { show: true, right: 8, top: 0, feature: { brush: { type: ["rect", "clear"], title: { rect: "BubbleUp: select a region", clear: "Clear" } } }, iconStyle: { borderColor: "#8b93a7" } } : undefined,
-      series: [{ type: "heatmap", data, emphasis: { itemStyle: { borderColor: "#fff", borderWidth: 1 } } }],
+      visualMap: { min: 0, max: Math.max(1, hm.max_count), show: false, inRange: { color: [C.grid, "#3b2470", C.violet, C.accent, C.warn] } },
+      brush: onBrush ? { toolbox: ["rect", "clear"], xAxisIndex: 0, yAxisIndex: 0, brushStyle: { color: "rgba(255,92,207,0.2)", borderColor: C.accent } } : undefined,
+      toolbox: onBrush ? { show: true, right: 8, top: 0, feature: { brush: { type: ["rect", "clear"], title: { rect: "BubbleUp: select a region", clear: "Clear" } } }, iconStyle: { borderColor: C.faint } } : undefined,
+      series: [{ type: "heatmap", data, emphasis: { itemStyle: { borderColor: C.fg, borderWidth: 1 } } }],
     };
   }, [hm, onBrush]);
   const events = useMemo(() => {

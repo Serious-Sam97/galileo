@@ -78,9 +78,9 @@ function DiffInner() {
   }, [rows, ta.data, tb.data]);
 
   return (
-    <div className="space-y-3">
+    <div className="mx-auto max-w-[1400px] space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-base font-semibold">Trace diff</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Trace diff</h1>
         <span className="text-xs text-muted">A = baseline, B = compared. Spans are aligned by service and name; the delta is B − A.</span>
       </div>
       <div className="grid gap-3 md:grid-cols-2">

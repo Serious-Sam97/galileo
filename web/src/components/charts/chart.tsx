@@ -1,17 +1,15 @@
 "use client";
 
-import { chartTokens } from "@/lib/theme";
+import { C } from "@/lib/palette";
 
 import * as echarts from "echarts";
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 export type EChartsOption = echarts.EChartsOption;
 
 export function Chart({ option, height = 260, onEvents, className }: { option: EChartsOption; height?: number | string; onEvents?: Record<string, (p: unknown) => void>; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const inst = useRef<echarts.ECharts | null>(null);
-  const [themeTick, setThemeTick] = useState(0);
-  useEffect(() => { const f = () => setThemeTick((x) => x + 1); window.addEventListener("galileo-theme", f); return () => window.removeEventListener("galileo-theme", f); }, []);
   useEffect(() => {
     if (!ref.current) return;
     const chart = echarts.init(ref.current, undefined, { renderer: "canvas" });
@@ -32,26 +30,27 @@ export function Chart({ option, height = 260, onEvents, className }: { option: E
     chart.off("brushEnd");
     chart.off("brushselected");
     if (onEvents) for (const [k, fn] of Object.entries(onEvents)) chart.on(k, fn);
-  }, [option, onEvents, themeTick]);
+  }, [option, onEvents]);
   return <div ref={ref} className={className} style={{ height, width: "100%" }} />;
 }
 
+const reducedMotion = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
 function baseOption(): EChartsOption {
-  const tok = chartTokens();
-  axisStyle.axisLine.lineStyle.color = tok.border;
-  axisStyle.axisLabel.color = tok.muted;
-  axisStyle.splitLine.lineStyle.color = tok.border;
   return {
     backgroundColor: "transparent",
-    textStyle: { color: tok.muted, fontFamily: "inherit", fontSize: 11 },
-    animation: false,
+    textStyle: { color: C.muted, fontFamily: "inherit", fontSize: 11 },
+    // a short draw-in on first render; updates (refetches) stay snappy
+    animation: !reducedMotion(),
+    animationDuration: 450,
+    animationDurationUpdate: 200,
     grid: { left: 48, right: 16, top: 24, bottom: 28, containLabel: false },
   };
 }
 
 export const axisStyle = {
-  axisLine: { lineStyle: { color: "#232a3a" } },
+  axisLine: { lineStyle: { color: C.border } },
   axisTick: { show: false },
-  axisLabel: { color: "#8b93a7", fontSize: 10 },
-  splitLine: { lineStyle: { color: "#1a2030" } },
+  axisLabel: { color: C.faint, fontSize: 10 },
+  splitLine: { lineStyle: { color: C.grid } },
 };

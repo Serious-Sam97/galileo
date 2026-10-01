@@ -2,28 +2,26 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import clsx from "clsx";
 import { useProjectId, useProjectQuery, useProjectMutation, useRunQuery } from "@/lib/hooks";
 import { post, put, del, patch } from "@/lib/api";
-import { Button, Card, Stat, Table, Th, Td, Empty, ErrorBox, Badge, Drawer, Input, Label, Select, Textarea } from "@/components/ui";
+import { Button, Card, Stat, Table, Th, Td, Empty, ErrorBox, Badge, Drawer, Input, Label, Select, Textarea, PageHeader, Tabs } from "@/components/ui";
 import { Chart, axisStyle, type EChartsOption } from "@/components/charts/chart";
 import { fmtNum, fmtUsd, fmtMs, fmtTime, colorFor } from "@/lib/format";
 import type { Provider, Route, PromptSummary, PromptVersion, Query, EvalsRes, SpanQuality, QualityAgg, AgentRun, GoldenDataset, PromptCi, Guardrails } from "@/lib/types";
 import { RecipientsEditor } from "@/components/recipients";
 import { useEffect } from "react";
 import { Plus, Trash2, Pencil } from "lucide-react";
+import { C, tooltipStyle } from "@/lib/palette";
+import { useLastSeconds } from "@/lib/time-range";
 
 type Tab = "usage" | "calls" | "agents" | "routes" | "providers" | "prompts" | "datasets" | "evals";
 
 export default function AiPage() {
   const [tab, setTab] = useState<Tab>("usage");
   return (
-    <div className="space-y-3">
-      <div className="flex gap-1 border-b">
-        {(["usage", "calls", "agents", "routes", "providers", "prompts", "datasets", "evals"] as Tab[]).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={clsx("px-3 py-1.5 text-sm capitalize border-b-2 -mb-px", tab === t ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg")}>{t}</button>
-        ))}
-      </div>
+    <div className="mx-auto max-w-[1400px] space-y-4">
+      <PageHeader title="AI" sub="Gateway usage and cost, every model call, agent runs, routes, providers, prompts, datasets and evals." />
+      <Tabs tabs={["usage", "calls", "agents", "routes", "providers", "prompts", "datasets", "evals"] as Tab[]} value={tab} onChange={setTab} />
       {tab === "usage" && <Usage />}
       {tab === "calls" && <Calls />}
       {tab === "routes" && <Routes />}
@@ -54,8 +52,8 @@ function Usage() {
     const models = [...new Set(d.by_day.map((r) => r.model))];
     const dayList = [...new Set(d.by_day.map((r) => r.day))].sort();
     return {
-      tooltip: { trigger: "axis", backgroundColor: "#161c29", borderColor: "#232a3a", textStyle: { color: "#e6e9ef", fontSize: 11 }, valueFormatter: (v) => fmtUsd(v as number) },
-      legend: { top: 0, textStyle: { color: "#8b93a7", fontSize: 10 } },
+      tooltip: { trigger: "axis", ...tooltipStyle, valueFormatter: (v) => fmtUsd(v as number) },
+      legend: { top: 0, textStyle: { color: C.faint, fontSize: 10 } },
       xAxis: { type: "category", data: dayList, ...axisStyle },
       yAxis: { type: "value", ...axisStyle, axisLabel: { ...axisStyle.axisLabel, formatter: (v: number) => fmtUsd(v) } },
       series: models.map((m, i) => ({ name: m, type: "bar", stack: "cost", itemStyle: { color: colorFor(i) }, data: dayList.map((day) => d.by_day.find((r) => r.day === day && r.model === m)?.cost_usd ?? 0) })),
@@ -108,7 +106,7 @@ function Usage() {
 
 function Calls() {
   const pid = useProjectId();
-  const [last, setLast] = useState(86400);
+  const [last] = useLastSeconds();
   const [model, setModel] = useState("");
   const [sel, setSel] = useState<Record<string, unknown> | null>(null);
   const q: Query = { dataset: "spans", time_range: { last_seconds: last }, calculations: [], filters: [{ field: "gen_ai.system", op: "exists" }, ...(model ? [{ field: "gen_ai.response.model", op: "eq" as const, value: model }] : [])], breakdowns: [], orders: [], limit: 200, columns: ["gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens", "gen_ai.usage.cost_usd", "gen_ai.galileo.route", "gen_ai.response.finish_reasons", "gen_ai.prompt", "gen_ai.completion", "gen_ai.galileo.time_to_first_token_ms", "gen_ai.galileo.cache_hit", "gen_ai.galileo.experiment", "gen_ai.galileo.experiment.arm", "gen_ai.galileo.prompt.name", "gen_ai.galileo.prompt.version", "gen_ai.tool_calls", "gen_ai.galileo.guardrail", "gen_ai.galileo.cache_kind", "gen_ai.galileo.routing", "gen_ai.conversation.id"] };
@@ -125,7 +123,6 @@ function Calls() {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <Select value={last} onChange={(e) => setLast(Number(e.target.value))}>{[3600, 86400, 7 * 86400].map((s) => <option key={s} value={s}>Last {s / 3600 >= 24 ? s / 86400 + "d" : s / 3600 + "h"}</option>)}</Select>
         <Input className="w-56" placeholder="model" value={model} onChange={(e) => setModel(e.target.value)} />
       </div>
       <ErrorBox error={r.error} />
@@ -439,13 +436,12 @@ function Evals() {
 
 function Agents() {
   const pid = useProjectId();
-  const [last, setLast] = useState(86400);
+  const [last] = useLastSeconds();
   const [user, setUser] = useState("");
   const q = useProjectQuery<{ runs: AgentRun[] }>(["agent-runs", last, user], `/agent-runs?last_seconds=${last}&user_id=${encodeURIComponent(user)}`);
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <Select value={last} onChange={(e) => setLast(Number(e.target.value))}>{[3600, 86400, 7 * 86400, 30 * 86400].map((s) => <option key={s} value={s}>Last {s >= 86400 ? s / 86400 + "d" : s / 3600 + "h"}</option>)}</Select>
         <Input className="w-56" placeholder="user id" value={user} onChange={(e) => setUser(e.target.value)} />
         <span className="text-xs text-muted">Runs group gateway calls by <code>gen_ai.conversation.id</code> (header <code>x-galileo-conversation-id</code>, or the SDK&apos;s <code>agent.run()</code>).</span>
       </div>

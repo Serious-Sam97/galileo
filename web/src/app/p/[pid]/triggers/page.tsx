@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useProjectId, useProjectQuery, useProjectMutation } from "@/lib/hooks";
 import { post } from "@/lib/api";
-import { Button, Table, Th, Td, Empty, Badge, Drawer, ErrorBox } from "@/components/ui";
+import { Button, Table, Th, Td, Empty, Badge, Drawer, ErrorBox, PageHeader } from "@/components/ui";
 import { TriggerForm, type TriggerDraft, emptyTrigger } from "./form";
 import type { Trigger } from "@/lib/types";
 import { ago, fmtDuration, fmtNum } from "@/lib/format";
@@ -17,11 +17,8 @@ export default function TriggersPage() {
   const create = useProjectMutation<TriggerDraft>((p, b) => post(`/api/projects/${p}/triggers`, b), [["triggers"]]);
   const rows = list.data?.triggers ?? [];
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-muted text-sm">A trigger runs a query on a schedule and notifies when the result crosses a threshold. With breakdowns, the worst group decides.</p>
-        <Button variant="primary" size="sm" onClick={() => setCreating(true)}><Plus size={13} /> Trigger</Button>
-      </div>
+    <div className="mx-auto max-w-[1400px] space-y-4">
+      <PageHeader title="Triggers" sub="A trigger runs a query on a schedule and notifies when the result crosses a threshold. With breakdowns, the worst group decides." actions={<Button variant="primary" onClick={() => setCreating(true)}><Plus size={14} /> New trigger</Button>} />
       <ErrorBox error={list.error} />
       {rows.length === 0 ? <Empty>No triggers yet.</Empty> : (
         <Table>

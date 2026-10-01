@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "@/lib/api";
 import { Button, Input, Label, ErrorBox } from "@/components/ui";
-import { Telescope } from "lucide-react";
+import { AuthShell } from "@/components/auth-shell";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -40,10 +40,9 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex flex-1 items-center justify-center p-6">
-      <form onSubmit={submit} className="w-full max-w-sm rounded-xl border bg-panel p-6 space-y-4">
-        <div className="flex items-center gap-2 text-lg font-semibold"><Telescope className="text-accent" size={22} /> Galileo</div>
-        <p className="text-muted text-sm">
+    <AuthShell>
+      <form onSubmit={submit} className="space-y-4">
+        <p className="text-sm font-medium">
           {effective === "register" ? (setup.data?.needs_setup ? "Create the first account for this instance." : "Create an account.") : "Sign in to your workspace."}
         </p>
         {effective === "register" && (
@@ -62,12 +61,12 @@ export default function LoginPage() {
           {effective === "register" ? "Create account" : "Sign in"}
         </Button>
         {sso.data?.enabled && effective === "login" && (
-          <a href="/api/auth/oidc/start" className="block w-full rounded-md border px-3 py-2 text-center text-sm hover:bg-panel-2">{sso.data.label || "Continue with SSO"}</a>
+          <a href="/api/auth/oidc/start" className="block w-full rounded-lg border px-3 py-2 text-center text-sm hover:bg-panel-2">{sso.data.label || "Continue with SSO"}</a>
         )}
         <button type="button" className="w-full text-center text-xs text-muted hover:text-fg" onClick={() => setMode(effective === "login" ? "register" : "login")}>
           {effective === "login" ? "Need an account? Register" : "Have an account? Sign in"}
         </button>
       </form>
-    </div>
+    </AuthShell>
   );
 }

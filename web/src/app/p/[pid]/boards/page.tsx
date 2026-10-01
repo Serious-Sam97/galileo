@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useProjectId, useProjectQuery, useProjectMutation } from "@/lib/hooks";
 import { post, del } from "@/lib/api";
-import { Button, Table, Th, Td, Empty, Drawer, ErrorBox, Input, Label, Textarea } from "@/components/ui";
+import { Button, Table, Th, Td, Empty, Drawer, ErrorBox, Input, Label, Textarea, PageHeader } from "@/components/ui";
 import type { Board, SavedQuery } from "@/lib/types";
 import { ago, encodeQ } from "@/lib/format";
 import { Plus, Trash2 } from "lucide-react";
@@ -22,6 +22,8 @@ export default function BoardsPage() {
   const removeBoard = useProjectMutation<string>((p, id) => del(`/api/projects/${p}/boards/${id}`), [["boards"]]);
   const removeQuery = useProjectMutation<string>((p, id) => del(`/api/projects/${p}/saved-queries/${id}`), [["saved-queries"]]);
   return (
+    <div className="mx-auto max-w-[1400px] space-y-4">
+    <PageHeader title="Boards" sub="Dashboards built from saved queries, and the queries themselves." />
     <div className="grid gap-4 md:grid-cols-2">
       <div className="space-y-3">
         <div className="flex items-center justify-between"><h2 className="font-semibold">Boards</h2><div className="flex items-center gap-2"><select className="rounded-md border bg-bg px-2 py-1 text-xs" value={tpl.kind} onChange={(e) => setTpl({ ...tpl, kind: e.target.value })}><option value="red">RED per service</option><option value="llm">LLM cost &amp; quality</option><option value="browser">Browser vitals</option></select>{tpl.kind === "red" && <select className="rounded-md border bg-bg px-2 py-1 text-xs" value={tpl.service} onChange={(e) => setTpl({ ...tpl, service: e.target.value })}><option value="">all services</option>{services.data?.services.map((s) => <option key={s.service_name} value={s.service_name}>{s.service_name}</option>)}</select>}<Button size="sm" onClick={() => fromTemplate.mutate({ kind: tpl.kind, service: tpl.service || undefined })}>New from template</Button><Button variant="primary" size="sm" onClick={() => setCreating(true)}><Plus size={13} /> Board</Button></div></div>
@@ -46,6 +48,7 @@ export default function BoardsPage() {
           <Button type="submit" variant="primary">Create</Button>
         </form>
       </Drawer>
+    </div>
     </div>
   );
 }

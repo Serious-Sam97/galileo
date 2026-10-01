@@ -23,7 +23,7 @@ export function QueryBuilder({ query, onChange, onRun, onSave, running }: { quer
   const setHaving = (i: number, h: Having) => set({ having: (query.having ?? []).map((x, j) => (j === i ? h : x)) });
 
   return (
-    <div className="rounded-lg border bg-panel p-3 space-y-3" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onRun(); }}>
+    <div className="rounded-xl border bg-panel/80 p-3 space-y-3" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onRun(); }}>
       <datalist id={listId}>{fieldNames.map((n) => <option key={n} value={n} />)}</datalist>
       <div className="flex flex-wrap items-center gap-2">
         <Select value={query.dataset} onChange={(e) => set({ dataset: e.target.value as Dataset, calculations: [{ op: "COUNT" }], filters: [], breakdowns: [], orders: [] })}>

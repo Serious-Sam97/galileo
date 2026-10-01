@@ -6,13 +6,14 @@ import * as echarts from "echarts";
 import { Resvg } from "@resvg/resvg-js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { C, SERIES } from "@/lib/palette";
 
 const FONT = "DejaVu Sans";
 let fontFile: string | undefined;
 try { fontFile = join(process.cwd(), "public/fonts/DejaVuSans.ttf"); readFileSync(fontFile); } catch { fontFile = undefined; }
 
 const API = process.env.GALILEO_API_INTERNAL ?? process.env.NEXT_PUBLIC_GALILEO_API ?? "http://localhost:8080";
-const PALETTE = ["#f5a524", "#5b9cff", "#34d399", "#c084fc", "#ff5c6c", "#22d3ee", "#a3e635", "#fb923c"];
+const PALETTE = SERIES;
 
 async function api<T>(path: string, cookie: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${API}${path}`, { ...init, headers: { cookie, "content-type": "application/json", ...(init?.headers ?? {}) }, cache: "no-store" });
@@ -30,13 +31,13 @@ function chartSvg(title: string, res: Res, w: number, h: number): string {
     data: g.series.map((p) => [p.ts * 1000, p.values[ci]]),
   })));
   chart.setOption({
-    backgroundColor: "#0d1017", animation: false,
-    title: { text: title, left: 10, top: 6, textStyle: { color: "#e6e9ef", fontSize: 13, fontWeight: 500, fontFamily: FONT } },
+    backgroundColor: C.bg, animation: false,
+    title: { text: title, left: 10, top: 6, textStyle: { color: C.fg, fontSize: 13, fontWeight: 500, fontFamily: FONT } },
     textStyle: { fontFamily: FONT },
-    legend: { bottom: 4, textStyle: { color: "#8b93a7", fontSize: 10, fontFamily: FONT }, type: "scroll" },
+    legend: { bottom: 4, textStyle: { color: C.faint, fontSize: 10, fontFamily: FONT }, type: "scroll" },
     grid: { left: 48, right: 16, top: 34, bottom: 40 },
-    xAxis: { type: "time", axisLabel: { color: "#8b93a7", fontSize: 10, fontFamily: FONT }, axisLine: { lineStyle: { color: "#232a3a" } } },
-    yAxis: { type: "value", axisLabel: { color: "#8b93a7", fontSize: 10, fontFamily: FONT }, splitLine: { lineStyle: { color: "#1a2030" } } },
+    xAxis: { type: "time", axisLabel: { color: C.faint, fontSize: 10, fontFamily: FONT }, axisLine: { lineStyle: { color: C.border } } },
+    yAxis: { type: "value", axisLabel: { color: C.faint, fontSize: 10, fontFamily: FONT }, splitLine: { lineStyle: { color: C.grid } } },
     series,
   });
   const svg = chart.renderToSVGString();
@@ -45,7 +46,7 @@ function chartSvg(title: string, res: Res, w: number, h: number): string {
 }
 
 function statSvg(title: string, value: string, sub: string, w: number, h: number): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="#0d1017"/><text x="12" y="22" fill="#e6e9ef" font-size="13" font-family="DejaVu Sans,Helvetica,Arial">${esc(title)}</text><text x="12" y="${h / 2 + 12}" fill="#f5a524" font-size="36" font-weight="600" font-family="DejaVu Sans,Helvetica,Arial">${esc(value)}</text><text x="12" y="${h - 14}" fill="#8b93a7" font-size="11" font-family="DejaVu Sans,Helvetica,Arial">${esc(sub)}</text></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="${C.bg}"/><text x="12" y="22" fill="${C.fg}" font-size="13" font-family="DejaVu Sans,Helvetica,Arial">${esc(title)}</text><text x="12" y="${h / 2 + 12}" fill="#f5a524" font-size="36" font-weight="600" font-family="DejaVu Sans,Helvetica,Arial">${esc(value)}</text><text x="12" y="${h - 14}" fill="${C.faint}" font-size="11" font-family="DejaVu Sans,Helvetica,Arial">${esc(sub)}</text></svg>`;
 }
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const fmt = (v: number | null | undefined) => v == null ? "–" : Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(Math.abs(v) < 10 ? 2 : 0);
@@ -89,7 +90,7 @@ export async function GET(req: NextRequest) {
   } catch (e) { return new Response(`render failed: ${(e as Error).message}`, { status: 502 }); }
   const H = Math.max(...tiles.map((t) => t.y + t.h)) + 28;
   const inner = tiles.map((t) => `<g transform="translate(${t.x},${t.y + 28})">${t.svg.replace(/<\?xml[^>]*>/, "").replace(/<svg([^>]*)>/, `<svg$1>`)}</g>`).join("");
-  const composed = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="100%" height="100%" fill="#0d1017"/><text x="10" y="19" fill="#e6e9ef" font-size="14" font-weight="600" font-family="DejaVu Sans,Helvetica,Arial">${esc(title)} · ${esc(new Date().toISOString().slice(0, 16).replace("T", " "))} UTC</text>${inner}</svg>`;
+  const composed = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="100%" height="100%" fill="${C.bg}"/><text x="10" y="19" fill="${C.fg}" font-size="14" font-weight="600" font-family="DejaVu Sans,Helvetica,Arial">${esc(title)} · ${esc(new Date().toISOString().slice(0, 16).replace("T", " "))} UTC</text>${inner}</svg>`;
   const png = new Resvg(composed, { fitTo: { mode: "width", value: W }, font: { loadSystemFonts: !fontFile, fontFiles: fontFile ? [fontFile] : [], defaultFontFamily: FONT } }).render().asPng();
   return new Response(new Uint8Array(png), { headers: { "content-type": "image/png", "cache-control": "no-store", "content-disposition": `inline; filename="${title.replace(/[^a-z0-9-]+/gi, "-").toLowerCase()}.png"` } });
 }

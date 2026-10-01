@@ -45,8 +45,7 @@ export function ago(iso: string | null | undefined): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-export const PALETTE = ["#f5a524", "#5b9cff", "#3ecf8e", "#ff5c6c", "#c084fc", "#22d3ee", "#fb923c", "#a3e635", "#f472b6", "#94a3b8"];
-export const colorFor = (i: number) => PALETTE[i % PALETTE.length];
+export { SERIES as PALETTE, colorFor } from "./palette";
 
 /** Encode a query into a URL-safe string and back. */
 export function encodeQ(q: unknown): string {

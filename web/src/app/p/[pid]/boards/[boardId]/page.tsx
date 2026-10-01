@@ -64,10 +64,10 @@ export default function BoardPage() {
     setSent(r.ok ? "sent" : `failed (${r.status})`);
   };
   return (
-    <div className="space-y-3">
+    <div className="mx-auto max-w-[1400px] space-y-4">
       <div className="flex items-center gap-3 flex-wrap">
         <Link href={`/p/${pid}/boards`} className="text-muted hover:text-fg text-xs">← boards</Link>
-        <h1 className="text-base font-semibold">{board.name}</h1>
+        <h1 className="text-xl font-semibold tracking-tight">{board.name}</h1>
         <span className="text-muted text-sm">{board.description}</span>
         {board.template && <Badge>{board.template}</Badge>}
         <div className="ml-auto flex items-center gap-2 flex-wrap">
@@ -84,7 +84,7 @@ export default function BoardPage() {
       {board.panels.length === 0 ? <Empty>No panels yet. Add one, or create a board from a template.</Empty> : (
         <GridLayout className="layout" layout={layout} width={1180} gridConfig={{ cols: COLS, rowHeight: 64, margin: [12, 12] }} dragConfig={{ handle: ".panel-handle" }} compactor={verticalCompactor} onLayoutChange={onLayout}>
           {board.panels.map((p) => (
-            <div key={p.id} className="rounded-lg border bg-panel overflow-hidden flex flex-col">
+            <div key={p.id} className="rounded-xl border bg-panel/80 overflow-hidden flex flex-col">
               <div className="panel-handle flex items-center gap-2 border-b px-3 py-1.5 text-xs cursor-move select-none">
                 <span className="font-medium truncate">{p.title || p.viz}</span>
                 <span className="ml-auto flex items-center gap-2 text-muted">
