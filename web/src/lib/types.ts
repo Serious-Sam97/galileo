@@ -113,7 +113,7 @@ export interface BubbleUpResponse { inside_count: number; outside_count: number;
 
 export interface Project { id: string; org_id: string; name: string; slug: string; created_at: string }
 export interface Org { id: string; name: string; slug: string; role: string }
-export interface User { id: string; email: string; name: string }
+export interface User { id: string; email: string; name: string; is_master?: boolean; must_change_password?: boolean }
 export interface Me { user: User; orgs: Org[]; projects: Project[] }
 
 export interface ApiKey { id: string; name: string; key_prefix: string; scopes: string[]; created_at: string; last_used_at: string | null; revoked_at: string | null }

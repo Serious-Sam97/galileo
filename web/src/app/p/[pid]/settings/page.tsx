@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import clsx from "clsx";
-import { useProjectId, useProjectQuery, useProjectMutation, useMe } from "@/lib/hooks";
+import { useProjectId, useProjectQuery, useProjectMutation, useMe, useAccess, type PermKey } from "@/lib/hooks";
 import { post, del, patch } from "@/lib/api";
 import { Button, Card, Table, Th, Td, Empty, Badge, Drawer, ErrorBox, Input, Label, Select, Textarea, Stat, PageHeader, Tabs } from "@/components/ui";
-import type { ApiKey, RedactionRule, Member, Invite, ApiToken, AuditRow, Channel, LogPipeline, LogProcessor, LogMatch, LogMetricRule, UsageRes, MaintenanceWindow, OncallSchedule, Trigger } from "@/lib/types";
+import type { ApiKey, RedactionRule, Member, Invite, AuditRow, Channel, LogPipeline, LogProcessor, LogMatch, LogMetricRule, UsageRes, MaintenanceWindow, OncallSchedule, Trigger } from "@/lib/types";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { del as apiDel, get as apiGet, patch as apiPatch, post as apiPost, put as apiPut } from "@/lib/api";
 import { ago, fmtTime, fmtNum, fmtMs, fmtDuration } from "@/lib/format";
@@ -40,20 +40,26 @@ function IssueSettings() {
   );
 }
 
+type SettingsTab = "keys" | "redaction" | "connect" | "project" | "issues" | "org" | "audit" | "notifications" | "health" | "logs";
+/** The permission a tab needs; tabs without one are for every member. */
+const TAB_PERM: Partial<Record<SettingsTab, PermKey>> = { keys: "manage_ingest", redaction: "manage_ingest", logs: "manage_ingest", notifications: "manage_project", issues: "manage_project", project: "manage_project", audit: "audit_export" };
+
 export default function SettingsPage() {
-  const [tab, setTab] = useState<"keys" | "redaction" | "connect" | "project" | "issues" | "org" | "tokens" | "audit" | "notifications" | "health" | "logs">("keys");
+  const access = useAccess();
+  const visible = (["keys", "connect", "redaction", "logs", "notifications", "issues", "project", "org", "audit", "health"] as const).filter((t) => !TAB_PERM[t] || access.can(TAB_PERM[t]!));
+  const [picked, setTab] = useState<SettingsTab>("keys");
+  const tab: SettingsTab = visible.includes(picked as (typeof visible)[number]) ? picked : (visible[0] ?? "connect");
   return (
     <div className="mx-auto max-w-[1400px] space-y-4">
       <PageHeader title="Settings" sub="Keys, connections, redaction, notifications and everything else about this project." />
-      <Tabs tabs={["keys", "connect", "redaction", "logs", "notifications", "issues", "project", "org", "tokens", "audit", "health"] as const} value={tab} onChange={setTab}
-        label={(t) => t === "keys" ? "API keys" : t === "org" ? "Organization" : t === "tokens" ? "Personal tokens" : t === "health" ? "Galileo health" : t} />
+      <Tabs tabs={visible} value={tab as (typeof visible)[number]} onChange={setTab}
+        label={(t) => t === "keys" ? "API keys" : t === "org" ? "Organization" : t === "health" ? "Galileo health" : t} />
       {tab === "keys" && <Keys />}
       {tab === "connect" && <Connect />}
       {tab === "redaction" && <Redaction />}
       {tab === "project" && <ProjectSettings />}
       {tab === "issues" && <IssueSettings />}
       {tab === "org" && <OrgSettings />}
-      {tab === "tokens" && <><Tokens /><div className="mt-3 grid gap-3 md:grid-cols-2"><TwoFactorCard /></div></>}
       {tab === "audit" && <Audit />}
       {tab === "notifications" && <><Notifications /><div className="grid gap-3 md:grid-cols-2"><MaintenanceCard /><OncallCard /></div></>}
       {tab === "health" && <GalileoHealth />}
@@ -268,16 +274,18 @@ function OrgSettings() {
   const pid = useProjectId();
   const orgId = me.data?.projects.find((p) => p.id === pid)?.org_id;
   const qc = useQueryClient();
-  const members = useQuery({ queryKey: ["org-members", orgId], queryFn: () => apiGet<{ members: Member[]; my_role: string }>(`/api/orgs/${orgId}/members`), enabled: !!orgId });
-  const invites = useQuery({ queryKey: ["org-invites", orgId], queryFn: () => apiGet<{ invites: Invite[] }>(`/api/orgs/${orgId}/invites`), enabled: !!orgId && ["owner", "admin"].includes(members.data?.my_role ?? "") });
+  const members = useQuery({ queryKey: ["org-members", orgId], queryFn: () => apiGet<{ members: Member[]; my_role: string; my_permissions?: string[] }>(`/api/orgs/${orgId}/members`), enabled: !!orgId });
+  const isMaster = !!me.data?.user.is_master;
+  const invites = useQuery({ queryKey: ["org-invites", orgId], queryFn: () => apiGet<{ invites: Invite[] }>(`/api/orgs/${orgId}/invites`), enabled: !!orgId && isMaster });
   const [form, setForm] = useState({ email: "", role: "member" });
   const [link, setLink] = useState<string | null>(null);
   const invite = useMutation({ mutationFn: (b: typeof form) => apiPost<{ link: string }>(`/api/orgs/${orgId}/invites`, b), onSuccess: (r) => { setLink(r.link); qc.invalidateQueries({ queryKey: ["org-invites", orgId] }); } });
   const setRole = useMutation({ mutationFn: (b: { user_id: string; role: string }) => apiPatch(`/api/orgs/${orgId}/members/${b.user_id}`, { role: b.role }), onSuccess: () => qc.invalidateQueries({ queryKey: ["org-members", orgId] }) });
   const remove = useMutation({ mutationFn: (user_id: string) => apiDel(`/api/orgs/${orgId}/members/${user_id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ["org-members", orgId] }) });
   const revoke = useMutation({ mutationFn: (id: string) => apiDel(`/api/orgs/${orgId}/invites/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ["org-invites", orgId] }) });
-  const canManage = ["owner", "admin"].includes(members.data?.my_role ?? "");
-  const isOwner = members.data?.my_role === "owner";
+  const myPerms = new Set(members.data?.my_permissions ?? []);
+  const canManage = myPerms.has("manage_members");
+  const isOwner = myPerms.has("manage_org");
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {orgId && <AssistantCard orgId={orgId} />}
@@ -287,9 +295,9 @@ function OrgSettings() {
             <Td>{isOwner ? <Select value={m.role} onChange={(e) => setRole.mutate({ user_id: m.user_id, role: e.target.value })}>{["owner", "admin", "member", "viewer"].map((r) => <option key={r}>{r}</option>)}</Select> : <Badge>{m.role}</Badge>}</Td>
             <Td className="text-right">{canManage && <Button size="sm" variant="ghost" onClick={() => confirm(`Remove ${m.email} from the organization?`) && remove.mutate(m.user_id)}><Trash2 size={12} /></Button>}</Td></tr>)}</tbody></Table>
         <ErrorBox error={setRole.error || remove.error} />
-        <p className="mt-2 text-[11px] text-muted">owner: everything · admin: manage projects, members, invites · member: configure and query · viewer: read only</p>
+        <p className="mt-2 text-[11px] text-muted">owner: everything · admin: AI, keys, settings, members, audit · member: edit content, triage, see sensitive data · viewer: read only. New accounts and fine-grained permissions: Accounts (Master).</p>
       </Card>
-      {canManage && (
+      {isMaster && (
         <Card title="Invite someone">
           <form className="space-y-3" onSubmit={async (e) => { e.preventDefault(); await invite.mutateAsync(form); }}>
             <div className="flex gap-2"><Input type="email" required placeholder="colleague@clinic.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /><Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}><option value="admin">admin</option><option value="member">member</option><option value="viewer">viewer</option></Select><Button type="submit" variant="primary">Invite</Button></div>
@@ -302,32 +310,6 @@ function OrgSettings() {
           )}
         </Card>
       )}
-    </div>
-  );
-}
-
-function Tokens() {
-  const qc = useQueryClient();
-  const list = useQuery({ queryKey: ["tokens"], queryFn: () => apiGet<{ tokens: ApiToken[] }>("/api/auth/tokens") });
-  const [name, setName] = useState("");
-  const [days, setDays] = useState("");
-  const [created, setCreated] = useState<string | null>(null);
-  const create = useMutation({ mutationFn: () => apiPost<{ token: string }>("/api/auth/tokens", { name, expires_days: days ? Number(days) : null }), onSuccess: (r) => { setCreated(r.token); setName(""); qc.invalidateQueries({ queryKey: ["tokens"] }); } });
-  const revoke = useMutation({ mutationFn: (id: string) => apiDel(`/api/auth/tokens/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ["tokens"] }) });
-  return (
-    <div className="grid gap-3 md:grid-cols-2">
-      <Card title="Personal API tokens">
-        <p className="text-muted text-sm mb-3">For scripts and CI calling the Galileo API as you: <span className="font-mono">Authorization: Bearer glt_…</span>. Same permissions as your account.</p>
-        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}><Input required placeholder="token name (e.g. ci deploy markers)" value={name} onChange={(e) => setName(e.target.value)} /><Input className="w-28" type="number" placeholder="days" value={days} onChange={(e) => setDays(e.target.value)} /><Button type="submit" variant="primary">Create</Button></form>
-        <ErrorBox error={create.error} />
-        {created && <div className="mt-3 rounded border bg-bg p-2 text-xs"><div className="text-muted mb-1">Copy it now, it is shown once.</div><div className="flex gap-2"><Input readOnly value={created} className="font-mono" /><Button onClick={() => navigator.clipboard.writeText(created)}><Copy size={13} /></Button></div></div>}
-      </Card>
-      <Card title="Your tokens">
-        {list.data?.tokens.length === 0 ? <Empty>No tokens.</Empty> : (
-          <Table><thead><tr><Th>Name</Th><Th>Prefix</Th><Th>Last used</Th><Th>Expires</Th><Th></Th></tr></thead>
-            <tbody>{list.data?.tokens.map((t) => <tr key={t.id} className={clsx(t.revoked_at && "opacity-50")}><Td>{t.name}</Td><Td className="font-mono">{t.token_prefix}…</Td><Td className="text-muted">{ago(t.last_used_at)}</Td><Td className="text-muted">{t.expires_at ? fmtTime(t.expires_at) : "never"}</Td><Td className="text-right">{t.revoked_at ? <Badge tone="err">revoked</Badge> : <Button size="sm" variant="ghost" onClick={() => revoke.mutate(t.id)}><Trash2 size={12} /></Button>}</Td></tr>)}</tbody></Table>
-        )}
-      </Card>
     </div>
   );
 }
@@ -468,38 +450,6 @@ function ConfigAsCodeCard() {
           <div className="text-muted mb-1">{result.dry_run ? "Would apply" : "Applied"} {result.changes.length} change(s){result.changes.length === 0 ? " — everything already matches" : ""}</div>
           {result.changes.map((c, i) => <div key={i} className="font-mono">{c.action} {c.section}: {c.name}</div>)}
         </div>
-      )}
-    </Card>
-  );
-}
-
-function TwoFactorCard() {
-  const q = useQuery({ queryKey: ["2fa"], queryFn: () => apiGet<{ enabled: boolean }>("/api/auth/2fa") });
-  const [setup, setSetup] = useState<{ secret: string; otpauth_url: string } | null>(null);
-  const [code, setCode] = useState("");
-  const qc = useQueryClient();
-  const start = useMutation({ mutationFn: () => apiPost<{ secret: string; otpauth_url: string }>("/api/auth/2fa/setup"), onSuccess: (r) => setSetup(r) });
-  const enable = useMutation({ mutationFn: () => apiPost("/api/auth/2fa/enable", { code }), onSuccess: () => { setSetup(null); setCode(""); qc.invalidateQueries({ queryKey: ["2fa"] }); } });
-  const disable = useMutation({ mutationFn: () => apiPost("/api/auth/2fa/disable", { code }), onSuccess: () => { setCode(""); qc.invalidateQueries({ queryKey: ["2fa"] }); } });
-  return (
-    <Card title="Two-factor authentication">
-      <p className="text-muted text-sm mb-2">Adds a TOTP code (Google Authenticator, 1Password, Aegis…) to password logins. SSO logins are governed by your identity provider.</p>
-      {q.data?.enabled ? (
-        <div className="space-y-2">
-          <Badge tone="ok">enabled</Badge>
-          <div className="flex gap-2 items-end"><div><Label>Code to disable</Label><Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" /></div><Button onClick={() => disable.mutate()}>Disable</Button></div>
-          <ErrorBox error={disable.error} />
-        </div>
-      ) : setup ? (
-        <div className="space-y-2">
-          <p className="text-sm">Add this secret to your authenticator app, then enter the current code.</p>
-          <pre className="rounded border bg-bg p-2 font-mono text-[11px] whitespace-pre-wrap break-all">{setup.secret}</pre>
-          <p className="text-[11px] text-muted break-all">{setup.otpauth_url}</p>
-          <div className="flex gap-2 items-end"><div><Label>Code</Label><Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" /></div><Button variant="primary" onClick={() => enable.mutate()}>Enable</Button></div>
-          <ErrorBox error={enable.error} />
-        </div>
-      ) : (
-        <Button onClick={() => start.mutate()}>Set up 2FA</Button>
       )}
     </Card>
   );

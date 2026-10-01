@@ -13,6 +13,7 @@ use crate::audit;
 use crate::auth::ProjectAccess;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::perms::Perm;
 
 #[derive(Debug, FromRow, serde::Serialize)]
 pub struct Channel { pub id: Uuid, pub name: String, pub kind: String, pub config: serde_json::Value, pub enabled: bool, pub created_at: DateTime<Utc> }
@@ -51,7 +52,7 @@ fn validate(st: &AppState, b: &ChannelBody) -> ApiResult<()> {
 }
 
 pub async fn create(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<ChannelBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?; validate(&st, &b)?;
+    pa.require(Perm::ManageProject)?; validate(&st, &b)?;
     let row: Channel = sqlx::query_as("INSERT INTO notification_channels (id, project_id, name, kind, config, enabled) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, kind, config, enabled, created_at")
         .bind(Uuid::now_v7()).bind(pa.project.id).bind(b.name.trim()).bind(&b.kind).bind(&b.config).bind(b.enabled).fetch_one(&st.pg).await?;
     audit::project(&st.pg, &pa, "channel.create", "channel", row.id, json!({ "name": row.name, "kind": row.kind })).await;
@@ -61,7 +62,7 @@ pub async fn create(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json
 #[derive(Deserialize)] pub struct ChannelPath { #[allow(dead_code)] pub project_id: Uuid, pub channel_id: Uuid }
 
 pub async fn update(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<ChannelPath>, Json(b): Json<ChannelBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageProject)?;
     // keep the stored telegram token when the client sends the mask back
     let mut config = b.config.clone();
     if b.kind == "telegram" && config.get("bot_token").and_then(|v| v.as_str()) == Some("••••••") {
@@ -78,7 +79,7 @@ pub async fn update(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path
 }
 
 pub async fn delete(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<ChannelPath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageProject)?;
     let r = sqlx::query("DELETE FROM notification_channels WHERE id = $1 AND project_id = $2").bind(p.channel_id).bind(pa.project.id).execute(&st.pg).await?;
     if r.rows_affected() == 0 { return Err(ApiError::NotFound("channel")); }
     audit::project(&st.pg, &pa, "channel.delete", "channel", p.channel_id, json!({})).await;
@@ -87,6 +88,7 @@ pub async fn delete(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path
 
 /// Send a test message through one channel.
 pub async fn test(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<ChannelPath>) -> ApiResult<Json<serde_json::Value>> {
+    pa.require(Perm::ManageProject)?;
     let row: Option<(String, serde_json::Value)> = sqlx::query_as("SELECT kind, config FROM notification_channels WHERE id = $1 AND project_id = $2").bind(p.channel_id).bind(pa.project.id).fetch_optional(&st.pg).await?;
     let (kind, config) = row.ok_or(ApiError::NotFound("channel"))?;
     let target = notify::target_from_channel(&kind, &config).ok_or_else(|| ApiError::BadRequest("channel config incomplete".into()))?;
@@ -109,7 +111,7 @@ pub async fn get_digest(State(st): State<AppState>, pa: ProjectAccess) -> ApiRes
 fn d8() -> i32 { 8 }
 
 pub async fn put_digest(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<DigestBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageProject)?;
     if !b.digest_channels.is_array() || !(0..=23).contains(&b.digest_hour_utc) { return Err(ApiError::BadRequest("digest_channels must be an array and digest_hour_utc 0..23".into())); }
     sqlx::query("INSERT INTO project_settings (project_id, digest_channels, digest_hour_utc) VALUES ($1, $2, $3) ON CONFLICT (project_id) DO UPDATE SET digest_channels = $2, digest_hour_utc = $3, updated_at = now()")
         .bind(pa.project.id).bind(&b.digest_channels).bind(b.digest_hour_utc).execute(&st.pg).await?;
@@ -119,6 +121,7 @@ pub async fn put_digest(State(st): State<AppState>, pa: ProjectAccess, Json(b): 
 
 /// Send yesterday's digest now (uses saved digest channels, or the body's).
 pub async fn send_digest(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<serde_json::Value>) -> ApiResult<Json<serde_json::Value>> {
+    pa.require(Perm::ManageProject)?;
     let channels = if b.get("channels").map(|c| c.is_array()).unwrap_or(false) { b["channels"].clone() } else {
         let s: Option<(serde_json::Value,)> = sqlx::query_as("SELECT digest_channels FROM project_settings WHERE project_id = $1").bind(pa.project.id).fetch_optional(&st.pg).await?;
         s.map(|x| x.0).unwrap_or(json!([]))

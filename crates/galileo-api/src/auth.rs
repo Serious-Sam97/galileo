@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use crate::db::{projects::Project, users::User};
 use crate::error::ApiError;
+use crate::perms::{Perm, PermSet};
 use crate::state::AppState;
 
 pub const SESSION_COOKIE: &str = "galileo_session";
@@ -119,8 +120,35 @@ impl FromRequestParts<AppState> for CurrentUser {
             crate::db::users::user_for_session(&state.pg, &hash_token(&token)).await?
         }
         .ok_or(ApiError::Unauthorized)?;
+        // Signed in with a temporary password: only reading who you are, choosing a new password
+        // and signing out are allowed until the password is changed.
+        if user.must_change_password {
+            let path = parts.uri.path().trim_end_matches('/');
+            if !["/auth/me", "/auth/password", "/auth/logout"].iter().any(|p| path.ends_with(p)) {
+                return Err(ApiError::Coded(axum::http::StatusCode::FORBIDDEN, "password_change_required", "choose a new password first".into()));
+            }
+        }
         Ok(CurrentUser { user })
     }
+}
+
+impl CurrentUser {
+    pub fn require_master(&self) -> Result<(), ApiError> {
+        if self.user.is_master { Ok(()) } else { Err(ApiError::Forbidden) }
+    }
+}
+
+/// The user's role and permissions in an organization; `NotFound` when they are not a member.
+/// The Master is owner of every organization.
+pub async fn org_access(state: &AppState, org_id: Uuid, user: &User) -> Result<(String, PermSet), ApiError> {
+    if user.is_master {
+        let exists: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM organizations WHERE id = $1").bind(org_id).fetch_optional(&state.pg).await?;
+        return exists.map(|_| ("owner".to_string(), PermSet::all())).ok_or(ApiError::NotFound("org"));
+    }
+    let role = crate::db::orgs::role_for(&state.pg, org_id, user.id).await?.ok_or(ApiError::NotFound("org"))?;
+    let overrides = crate::db::orgs::overrides(&state.pg, org_id, user.id).await?;
+    let perms = PermSet::resolve(&role, &overrides);
+    Ok((role, perms))
 }
 
 /// A project the current user may access, resolved from the `{project_id}` path segment.
@@ -129,25 +157,16 @@ pub struct ProjectAccess {
     pub user: User,
     pub project: Project,
     pub role: String,
+    /// The role's preset with the user's overrides; every permission for the Master.
+    pub perms: PermSet,
 }
 
 impl ProjectAccess {
-    pub fn can_write(&self) -> bool {
-        matches!(self.role.as_str(), "owner" | "admin" | "member" | "editor")
+    pub fn can(&self, p: Perm) -> bool {
+        self.perms.has(p)
     }
-    pub fn is_admin(&self) -> bool {
-        matches!(self.role.as_str(), "owner" | "admin")
-    }
-    /// Settings, deletes and membership changes.
-    pub fn require_admin(&self) -> Result<(), ApiError> {
-        if self.is_admin() { Ok(()) } else { Err(ApiError::Forbidden) }
-    }
-    pub fn require_write(&self) -> Result<(), ApiError> {
-        if self.can_write() {
-            Ok(())
-        } else {
-            Err(ApiError::Forbidden)
-        }
+    pub fn require(&self, p: Perm) -> Result<(), ApiError> {
+        if self.can(p) { Ok(()) } else { Err(ApiError::Forbidden) }
     }
 }
 
@@ -164,10 +183,15 @@ impl FromRequestParts<AppState> for ProjectAccess {
         let Path(ProjectPath { project_id }) = Path::<ProjectPath>::from_request_parts(parts, state)
             .await
             .map_err(|_| ApiError::BadRequest("invalid project id".into()))?;
-        let (project, role) = crate::db::projects::project_for_user(&state.pg, project_id, user.id)
+        let (project, role) = crate::db::projects::project_for_user(&state.pg, project_id, user.id, user.is_master)
             .await?
             .ok_or(ApiError::NotFound("project"))?;
-        Ok(ProjectAccess { user, project, role })
+        let perms = if user.is_master {
+            PermSet::all()
+        } else {
+            PermSet::resolve(&role, &crate::db::orgs::overrides(&state.pg, project.org_id, user.id).await?)
+        };
+        Ok(ProjectAccess { user, project, role, perms })
     }
 }
 

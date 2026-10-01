@@ -22,7 +22,11 @@ pub async fn create(pool: &PgPool, org_id: Uuid, name: &str, slug: &str) -> sqlx
         .await
 }
 
-pub async fn for_user(pool: &PgPool, user_id: Uuid) -> sqlx::Result<Vec<Project>> {
+/// The projects a user may open: those of their organizations, or every project for the Master.
+pub async fn for_user(pool: &PgPool, user_id: Uuid, master: bool) -> sqlx::Result<Vec<Project>> {
+    if master {
+        return sqlx::query_as("SELECT * FROM projects ORDER BY created_at").fetch_all(pool).await;
+    }
     sqlx::query_as(
         "SELECT p.* FROM projects p JOIN org_members m ON m.org_id = p.org_id \
          WHERE m.user_id = $1 ORDER BY p.created_at",
@@ -32,7 +36,12 @@ pub async fn for_user(pool: &PgPool, user_id: Uuid) -> sqlx::Result<Vec<Project>
     .await
 }
 
-pub async fn project_for_user(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> sqlx::Result<Option<(Project, String)>> {
+/// The project and the user's effective role in it. The Master is `owner` of every project.
+pub async fn project_for_user(pool: &PgPool, project_id: Uuid, user_id: Uuid, master: bool) -> sqlx::Result<Option<(Project, String)>> {
+    if master {
+        let p: Option<Project> = sqlx::query_as("SELECT * FROM projects WHERE id = $1").bind(project_id).fetch_optional(pool).await?;
+        return Ok(p.map(|p| (p, "owner".to_string())));
+    }
     #[derive(FromRow)]
     struct Row {
         id: Uuid,

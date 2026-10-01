@@ -17,14 +17,17 @@ use crate::auth::{self, CurrentUser, ProjectAccess};
 use crate::db::{orgs, users};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::perms::Perm;
 
 #[derive(Deserialize)]
 pub struct OrgPath { pub org_id: Uuid }
 
-async fn require_role(st: &AppState, org: Uuid, cu: &CurrentUser, roles: &[&str]) -> ApiResult<String> {
-    let role = orgs::role_for(&st.pg, org, cu.user.id).await?.ok_or(ApiError::NotFound("org"))?;
-    if !roles.contains(&role.as_str()) { return Err(ApiError::Forbidden); }
-    Ok(role)
+/// The caller's role in the organization, refusing non-members and, when `need` is given, those
+/// without that permission.
+async fn org_role(st: &AppState, org: Uuid, cu: &CurrentUser, need: Option<Perm>) -> ApiResult<(String, crate::perms::PermSet)> {
+    let (role, perms) = auth::org_access(st, org, &cu.user).await?;
+    if need.is_some_and(|p| !perms.has(p)) { return Err(ApiError::Forbidden); }
+    Ok((role, perms))
 }
 
 #[derive(Deserialize)]
@@ -33,7 +36,7 @@ fn d_last() -> i64 { 3600 }
 
 /// Every project of the org on one page.
 pub async fn overview(State(st): State<AppState>, cu: CurrentUser, Path(p): Path<OrgPath>, QueryParams(r): QueryParams<RangeParams>) -> ApiResult<Json<serde_json::Value>> {
-    require_role(&st, p.org_id, &cu, &["owner", "admin", "member", "viewer"]).await?;
+    org_role(&st, p.org_id, &cu, None).await?;
     #[derive(FromRow, serde::Serialize)]
     struct Proj { id: Uuid, name: String, slug: String, created_at: DateTime<Utc>, open_issues: i64 }
     let projects: Vec<Proj> = sqlx::query_as(
@@ -66,20 +69,22 @@ pub async fn overview(State(st): State<AppState>, cu: CurrentUser, Path(p): Path
 pub struct Member { pub user_id: Uuid, pub email: String, pub name: String, pub role: String, pub created_at: DateTime<Utc> }
 
 pub async fn members(State(st): State<AppState>, cu: CurrentUser, Path(p): Path<OrgPath>) -> ApiResult<Json<serde_json::Value>> {
-    let my_role = require_role(&st, p.org_id, &cu, &["owner", "admin", "member", "viewer"]).await?;
+    let (my_role, my_perms) = org_role(&st, p.org_id, &cu, None).await?;
     let rows: Vec<Member> = sqlx::query_as("SELECT m.user_id, u.email, u.name, m.role, m.created_at FROM org_members m JOIN users u ON u.id = m.user_id WHERE m.org_id = $1 ORDER BY m.created_at")
         .bind(p.org_id).fetch_all(&st.pg).await?;
-    Ok(Json(json!({ "members": rows, "my_role": my_role })))
+    Ok(Json(json!({ "members": rows, "my_role": my_role, "my_permissions": my_perms.keys() })))
 }
 
 #[derive(Deserialize)] pub struct MemberPath { pub org_id: Uuid, pub user_id: Uuid }
 #[derive(Deserialize)] pub struct RoleBody { pub role: String }
 
 pub async fn set_role(State(st): State<AppState>, cu: CurrentUser, Path(p): Path<MemberPath>, Json(b): Json<RoleBody>) -> ApiResult<Json<serde_json::Value>> {
-    require_role(&st, p.org_id, &cu, &["owner"]).await?;
+    let (_, perms) = org_role(&st, p.org_id, &cu, Some(Perm::ManageMembers)).await?;
     if !matches!(b.role.as_str(), "owner" | "admin" | "member" | "viewer") { return Err(ApiError::BadRequest("invalid role".into())); }
     let owners: i64 = sqlx::query_scalar("SELECT count(*) FROM org_members WHERE org_id = $1 AND role = 'owner'").bind(p.org_id).fetch_one(&st.pg).await?;
     let target_role = orgs::role_for(&st.pg, p.org_id, p.user_id).await?.ok_or(ApiError::NotFound("member"))?;
+    // Making or unmaking an owner is the owners' call.
+    if (b.role == "owner" || target_role == "owner") && !perms.has(Perm::ManageOrg) { return Err(ApiError::Forbidden); }
     if target_role == "owner" && b.role != "owner" && owners <= 1 { return Err(ApiError::BadRequest("an organization needs at least one owner".into())); }
     sqlx::query("UPDATE org_members SET role = $3 WHERE org_id = $1 AND user_id = $2").bind(p.org_id).bind(p.user_id).bind(&b.role).execute(&st.pg).await?;
     audit::org(&st.pg, p.org_id, &cu, "member.role", "user", p.user_id, json!({ "from": target_role, "to": b.role })).await;
@@ -87,8 +92,9 @@ pub async fn set_role(State(st): State<AppState>, cu: CurrentUser, Path(p): Path
 }
 
 pub async fn remove_member(State(st): State<AppState>, cu: CurrentUser, Path(p): Path<MemberPath>) -> ApiResult<Json<serde_json::Value>> {
-    require_role(&st, p.org_id, &cu, &["owner", "admin"]).await?;
+    let (_, perms) = org_role(&st, p.org_id, &cu, Some(Perm::ManageMembers)).await?;
     let target_role = orgs::role_for(&st.pg, p.org_id, p.user_id).await?.ok_or(ApiError::NotFound("member"))?;
+    if target_role == "owner" && !perms.has(Perm::ManageOrg) { return Err(ApiError::Forbidden); }
     let owners: i64 = sqlx::query_scalar("SELECT count(*) FROM org_members WHERE org_id = $1 AND role = 'owner'").bind(p.org_id).fetch_one(&st.pg).await?;
     if target_role == "owner" && owners <= 1 { return Err(ApiError::BadRequest("cannot remove the last owner".into())); }
     sqlx::query("DELETE FROM org_members WHERE org_id = $1 AND user_id = $2").bind(p.org_id).bind(p.user_id).execute(&st.pg).await?;
@@ -105,7 +111,9 @@ pub struct Invite { pub id: Uuid, pub email: String, pub role: String, pub creat
 fn d_member() -> String { "member".into() }
 
 pub async fn list_invites(State(st): State<AppState>, cu: CurrentUser, Path(p): Path<OrgPath>) -> ApiResult<Json<serde_json::Value>> {
-    require_role(&st, p.org_id, &cu, &["owner", "admin"]).await?;
+    // Invites create accounts, which is the Master's alone.
+    cu.require_master()?;
+    org_role(&st, p.org_id, &cu, None).await?;
     let rows: Vec<Invite> = sqlx::query_as("SELECT id, email, role, created_at, expires_at, accepted_at FROM org_invites WHERE org_id = $1 ORDER BY created_at DESC LIMIT 100").bind(p.org_id).fetch_all(&st.pg).await?;
     Ok(Json(json!({ "invites": rows })))
 }
@@ -113,7 +121,8 @@ pub async fn list_invites(State(st): State<AppState>, cu: CurrentUser, Path(p): 
 /// Creates an invite and returns the one-time link. E-mail delivery arrives with Phase 5; until
 /// then the admin copies the link.
 pub async fn create_invite(State(st): State<AppState>, cu: CurrentUser, headers: HeaderMap, Path(p): Path<OrgPath>, Json(b): Json<InviteBody>) -> ApiResult<Json<serde_json::Value>> {
-    require_role(&st, p.org_id, &cu, &["owner", "admin"]).await?;
+    cu.require_master()?;
+    org_role(&st, p.org_id, &cu, None).await?;
     let email = b.email.trim().to_ascii_lowercase();
     if !email.contains('@') { return Err(ApiError::BadRequest("invalid email".into())); }
     if !matches!(b.role.as_str(), "admin" | "member" | "viewer") { return Err(ApiError::BadRequest("role must be admin, member or viewer".into())); }
@@ -136,7 +145,8 @@ pub async fn create_invite(State(st): State<AppState>, cu: CurrentUser, headers:
 #[derive(Deserialize)] pub struct InvitePath { pub org_id: Uuid, pub invite_id: Uuid }
 
 pub async fn revoke_invite(State(st): State<AppState>, cu: CurrentUser, Path(p): Path<InvitePath>) -> ApiResult<Json<serde_json::Value>> {
-    require_role(&st, p.org_id, &cu, &["owner", "admin"]).await?;
+    cu.require_master()?;
+    org_role(&st, p.org_id, &cu, None).await?;
     let r = sqlx::query("DELETE FROM org_invites WHERE id = $1 AND org_id = $2 AND accepted_at IS NULL").bind(p.invite_id).bind(p.org_id).execute(&st.pg).await?;
     if r.rows_affected() == 0 { return Err(ApiError::NotFound("invite")); }
     audit::org(&st.pg, p.org_id, &cu, "invite.revoke", "invite", p.invite_id, json!({})).await;
@@ -168,9 +178,9 @@ pub async fn invite_info(State(st): State<AppState>, Path(p): Path<TokenPath>) -
 pub async fn invite_accept(State(st): State<AppState>, headers: HeaderMap, Path(p): Path<TokenPath>, Json(b): Json<AcceptBody>) -> ApiResult<impl IntoResponse> {
     let inv = load_invite(&st, &p.token).await?;
     let user = match users::by_email(&st.pg, &inv.email).await? {
-        Some(u) => { if !auth::verify_password(&b.password, &u.password_hash) { return Err(ApiError::Unauthorized); } u }
+        Some(_) => super::auth::check_credentials(&st, &inv.email, &b.password).await?,
         None => {
-            if b.password.len() < 8 { return Err(ApiError::BadRequest("password must be at least 8 characters".into())); }
+            super::auth::check_new_password(&b.password, &inv.email)?;
             let name = if b.name.trim().is_empty() { inv.email.split('@').next().unwrap_or("user").to_string() } else { b.name.trim().to_string() };
             users::create(&st.pg, &inv.email, &name, &auth::hash_password(&b.password)?).await?
         }
@@ -221,12 +231,13 @@ pub async fn revoke_token(State(st): State<AppState>, cu: CurrentUser, Path(p): 
 pub struct AuditRow { pub id: Uuid, pub project_id: Option<Uuid>, pub user_email: String, pub action: String, pub target_type: String, pub target_id: String, pub details: serde_json::Value, pub at: DateTime<Utc> }
 
 pub async fn org_audit(State(st): State<AppState>, cu: CurrentUser, Path(p): Path<OrgPath>) -> ApiResult<Json<serde_json::Value>> {
-    require_role(&st, p.org_id, &cu, &["owner", "admin"]).await?;
+    org_role(&st, p.org_id, &cu, Some(Perm::AuditExport)).await?;
     let rows: Vec<AuditRow> = sqlx::query_as("SELECT id, project_id, user_email, action, target_type, target_id, details, at FROM audit_log WHERE org_id = $1 ORDER BY at DESC LIMIT 300").bind(p.org_id).fetch_all(&st.pg).await?;
     Ok(Json(json!({ "audit": rows })))
 }
 
 pub async fn project_audit(State(st): State<AppState>, pa: ProjectAccess) -> ApiResult<Json<serde_json::Value>> {
+    pa.require(Perm::AuditExport)?;
     let rows: Vec<AuditRow> = sqlx::query_as("SELECT id, project_id, user_email, action, target_type, target_id, details, at FROM audit_log WHERE project_id = $1 ORDER BY at DESC LIMIT 300").bind(pa.project.id).fetch_all(&st.pg).await?;
     Ok(Json(json!({ "audit": rows })))
 }
@@ -246,7 +257,7 @@ pub async fn get_project_settings(State(st): State<AppState>, pa: ProjectAccess)
 #[derive(Deserialize)] pub struct SettingsBody { pub retention_spans_days: Option<i32>, pub retention_logs_days: Option<i32>, pub retention_metrics_days: Option<i32>, #[serde(default)] pub sampling: Option<galileo_core::Sampling> }
 
 pub async fn put_project_settings(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<SettingsBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageProject)?;
     for v in [b.retention_spans_days, b.retention_logs_days, b.retention_metrics_days].into_iter().flatten() {
         if !(1..=3650).contains(&v) { return Err(ApiError::BadRequest("retention must be 1..3650 days".into())); }
     }
@@ -290,7 +301,7 @@ pub async fn assistant_settings_for(pg: &sqlx::PgPool, org: Uuid) -> AssistantSe
 }
 
 pub async fn get_assistant(State(st): State<AppState>, cu: CurrentUser, Path(p): Path<OrgPath>) -> ApiResult<Json<serde_json::Value>> {
-    require_role(&st, p.org_id, &cu, &["owner", "admin", "member", "viewer"]).await?;
+    org_role(&st, p.org_id, &cu, None).await?;
     let s = assistant_settings_for(&st.pg, p.org_id).await;
     // routes available in the chosen project, for the picker
     let routes: Vec<(String,)> = match s.project_id {
@@ -301,7 +312,7 @@ pub async fn get_assistant(State(st): State<AppState>, cu: CurrentUser, Path(p):
 }
 
 pub async fn put_assistant(State(st): State<AppState>, cu: CurrentUser, Path(p): Path<OrgPath>, Json(b): Json<AssistantSettings>) -> ApiResult<Json<serde_json::Value>> {
-    require_role(&st, p.org_id, &cu, &["owner", "admin"]).await?;
+    org_role(&st, p.org_id, &cu, Some(Perm::ManageOrg)).await?;
     let mut b = b;
     b.max_steps = b.max_steps.clamp(1, 12);
     if let Some(pid) = b.project_id {

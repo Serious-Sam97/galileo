@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::auth::ProjectAccess;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::perms::Perm;
 
 fn slug() -> String {
     // 10 url-safe chars from a v7 uuid's entropy
@@ -43,6 +44,7 @@ pub struct Share {
 
 /// Freeze the current time range and store the query. Returns the slug.
 pub async fn create(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<CreateShare>) -> ApiResult<Json<serde_json::Value>> {
+    pa.require(Perm::EditContent)?;
     let mut q = Query::from_json(b.query).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let (start, end) = q.time_range.resolve(Utc::now());
     q.time_range = TimeRange::Absolute { start, end };

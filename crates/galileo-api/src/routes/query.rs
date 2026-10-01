@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::auth::ProjectAccess;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::perms::{self, Perm};
 
 fn qerr(e: galileo_query::QueryError) -> ApiError {
     match e {
@@ -21,9 +22,31 @@ fn qerr(e: galileo_query::QueryError) -> ApiError {
     }
 }
 
+/// Without `ViewSensitive`, a query may not name a sensitive field at all.
+fn guard(pa: &ProjectAccess, q: &serde_json::Value) -> ApiResult<()> {
+    if !pa.can(Perm::ViewSensitive) && perms::query_mentions_sensitive(q) {
+        return Err(ApiError::Coded(axum::http::StatusCode::FORBIDDEN, "sensitive_field", "this query uses fields you are not allowed to see".into()));
+    }
+    Ok(())
+}
+
+/// Without `ViewSensitive`, raw rows lose sensitive columns and attributes.
+fn redact_raw(pa: &ProjectAccess, res: &mut galileo_query::run::QueryResponse) {
+    if pa.can(Perm::ViewSensitive) { return; }
+    if let Some(raw) = res.raw.as_mut() {
+        let hidden: Vec<usize> = raw.columns.iter().enumerate().filter(|(_, c)| perms::is_sensitive(c)).map(|(i, _)| i).collect();
+        for row in raw.rows.iter_mut() {
+            for &i in &hidden { if let Some(v) = row.get_mut(i) { *v = serde_json::Value::Null; } }
+            row.iter_mut().for_each(perms::redact);
+        }
+    }
+}
+
 pub async fn run(State(st): State<AppState>, pa: ProjectAccess, Json(q): Json<serde_json::Value>) -> ApiResult<Json<galileo_query::run::QueryResponse>> {
+    guard(&pa, &q)?;
     let q = Query::from_json(q).map_err(qerr)?;
-    let res = galileo_query::run::run(st.storage.as_ref(), ProjectId(pa.project.id), &q).await.map_err(qerr)?;
+    let mut res = galileo_query::run::run(st.storage.as_ref(), ProjectId(pa.project.id), &q).await.map_err(qerr)?;
+    redact_raw(&pa, &mut res);
     // query history for the History drawer (best effort, deduped per minute)
     let (pg, uid, pid, qq) = (st.pg.clone(), pa.user.id, pa.project.id, q.clone());
     tokio::spawn(async move { crate::routes::boards::record_history(&pg, uid, pid, &qq).await; });
@@ -37,18 +60,28 @@ pub struct TracePath {
     pub trace_id: String,
 }
 
-pub async fn trace(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<TracePath>) -> ApiResult<Json<galileo_query::trace::TraceView>> {
+pub async fn trace(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<TracePath>) -> ApiResult<Json<serde_json::Value>> {
     let tid = TraceId::from_hex(p.trace_id.trim()).ok_or_else(|| ApiError::BadRequest("invalid trace id".into()))?;
     let spans = st.storage.fetch_trace(ProjectId(pa.project.id), tid).await?;
     if spans.is_empty() {
         return Err(ApiError::NotFound("trace"));
     }
-    Ok(Json(galileo_query::trace::assemble(tid, spans)))
+    let mut view = serde_json::to_value(galileo_query::trace::assemble(tid, spans)).map_err(|e| ApiError::Internal(e.to_string()))?;
+    if !pa.can(Perm::ViewSensitive) { perms::redact(&mut view); }
+    Ok(Json(view))
 }
 
-pub async fn bubbleup(State(st): State<AppState>, pa: ProjectAccess, Json(req): Json<BubbleUpRequest>) -> ApiResult<Json<galileo_query::bubbleup::BubbleUpResponse>> {
+pub async fn bubbleup(State(st): State<AppState>, pa: ProjectAccess, Json(req): Json<BubbleUpRequest>) -> ApiResult<Json<serde_json::Value>> {
+    guard(&pa, &serde_json::to_value(&req.query).unwrap_or_default())?;
     let res = galileo_query::bubbleup::run(st.storage.as_ref(), ProjectId(pa.project.id), &req).await.map_err(qerr)?;
-    Ok(Json(res))
+    let mut v = serde_json::to_value(res).map_err(|e| ApiError::Internal(e.to_string()))?;
+    // BubbleUp compares every attribute; sensitive keys drop out of its answer.
+    if !pa.can(Perm::ViewSensitive) {
+        if let Some(keys) = v.get_mut("keys").and_then(|k| k.as_array_mut()) {
+            keys.retain(|k| !k.get("key").and_then(|x| x.as_str()).is_some_and(perms::is_sensitive));
+        }
+    }
+    Ok(Json(v))
 }
 
 #[derive(Deserialize)]
@@ -95,6 +128,7 @@ pub struct ValuesParams {
 }
 
 pub async fn values(State(st): State<AppState>, pa: ProjectAccess, QueryParams(p): QueryParams<ValuesParams>) -> ApiResult<Json<serde_json::Value>> {
+    guard(&pa, &json!({ "field": p.field }))?;
     let (start, end) = TimeRange::Relative { last_seconds: p.last_seconds }.resolve(Utc::now());
     let sq = sql::values_query(p.dataset, &p.field, p.q.as_deref(), ProjectId(pa.project.id), start, end).map_err(qerr)?;
     let res = st.storage.query(&sq).await?;
@@ -125,10 +159,12 @@ pub async fn metric_names(State(st): State<AppState>, pa: ProjectAccess, QueryPa
 /// Recent traces list: one row per trace (root span), newest first. Built on the raw query
 /// shape with an `is_root` filter so it shares all the filter machinery.
 pub async fn recent_traces(State(st): State<AppState>, pa: ProjectAccess, Json(mut q): Json<Query>) -> ApiResult<Json<galileo_query::run::QueryResponse>> {
+    guard(&pa, &serde_json::to_value(&q).unwrap_or_default())?;
     q.dataset = Dataset::Spans;
     q.calculations.clear();
     q.filters.push(galileo_query::Filter::new("is_root", galileo_query::FilterOp::Eq, 1));
-    let res = galileo_query::run::run(st.storage.as_ref(), ProjectId(pa.project.id), &q).await.map_err(qerr)?;
+    let mut res = galileo_query::run::run(st.storage.as_ref(), ProjectId(pa.project.id), &q).await.map_err(qerr)?;
+    redact_raw(&pa, &mut res);
     Ok(Json(res))
 }
 
@@ -172,8 +208,10 @@ pub async fn stringify_dsl(State(_st): State<AppState>, _pa: ProjectAccess, Json
 /// Run the query and stream the result as CSV (grouped totals, or raw rows).
 pub async fn export_csv(State(st): State<AppState>, pa: ProjectAccess, Json(q): Json<serde_json::Value>) -> ApiResult<axum::response::Response> {
     use axum::response::IntoResponse;
+    guard(&pa, &q)?;
     let q = Query::from_json(q).map_err(qerr)?;
-    let res = galileo_query::run::run(st.storage.as_ref(), ProjectId(pa.project.id), &q).await.map_err(qerr)?;
+    let mut res = galileo_query::run::run(st.storage.as_ref(), ProjectId(pa.project.id), &q).await.map_err(qerr)?;
+    redact_raw(&pa, &mut res);
     let mut out = String::new();
     let esc = |s: &str| if s.contains([',', '"', '\n']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s.to_string() };
     if let Some(raw) = &res.raw {

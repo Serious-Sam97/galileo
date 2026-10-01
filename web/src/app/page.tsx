@@ -9,6 +9,7 @@ export default function Home() {
   const router = useRouter();
   useEffect(() => {
     if (me.isError) router.replace("/login");
+    else if (me.data?.user.must_change_password) router.replace("/password");
     else if (me.data) {
       const p = me.data.projects[0];
       router.replace(p ? `/p/${p.id}/overview` : "/login");

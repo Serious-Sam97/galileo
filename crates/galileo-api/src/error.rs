@@ -24,6 +24,9 @@ pub enum ApiError {
     Query(String),
     #[error("{0}")]
     Internal(String),
+    /// A refusal the UI acts on by its code (e.g. `password_change_required`, `locked`).
+    #[error("{2}")]
+    Coded(StatusCode, &'static str, String),
 }
 
 pub type ApiResult<T> = Result<T, ApiError>;
@@ -43,6 +46,7 @@ impl IntoResponse for ApiError {
             ApiError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
             ApiError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             ApiError::Query(_) => (StatusCode::UNPROCESSABLE_ENTITY, "invalid_query"),
+            ApiError::Coded(status, code, _) => (*status, *code),
             ApiError::Db(sqlx::Error::RowNotFound) => (StatusCode::NOT_FOUND, "not_found"),
             ApiError::Db(sqlx::Error::Database(db)) if db.is_unique_violation() => (StatusCode::CONFLICT, "conflict"),
             ApiError::Db(_) | ApiError::Storage(_) | ApiError::Internal(_) => {

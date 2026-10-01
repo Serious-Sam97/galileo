@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useProjectId, useProjectQuery, useProjectMutation } from "@/lib/hooks";
+import { useProjectId, useProjectQuery, useProjectMutation, useAccess } from "@/lib/hooks";
 import { post } from "@/lib/api";
 import { Button, Table, Th, Td, Empty, Badge, Drawer, ErrorBox, PageHeader } from "@/components/ui";
 import { SloForm, emptySlo, type SloDraft } from "./form";
@@ -13,6 +13,7 @@ import { Plus } from "lucide-react";
 const tone = (s: string) => (s === "burning" || s === "exhausted" ? "err" : s === "error" ? "warn" : "ok");
 
 export default function SlosPage() {
+  const access = useAccess();
   const pid = useProjectId();
   const list = useProjectQuery<{ slos: Slo[] }>(["slos"], "/slos", { refetchInterval: 30_000 });
   const [creating, setCreating] = useState(false);
@@ -20,7 +21,7 @@ export default function SlosPage() {
   const rows = list.data?.slos ?? [];
   return (
     <div className="mx-auto max-w-[1400px] space-y-4">
-      <PageHeader title="SLOs" sub="An SLO tracks the share of good events over a rolling window against a target, and alerts when the error budget burns too fast." actions={<Button variant="primary" onClick={() => setCreating(true)}><Plus size={14} /> New SLO</Button>} />
+      <PageHeader title="SLOs" sub="An SLO tracks the share of good events over a rolling window against a target, and alerts when the error budget burns too fast." actions={access.can("edit_content") && <Button variant="primary" onClick={() => setCreating(true)}><Plus size={14} /> New SLO</Button>} />
       <ErrorBox error={list.error} />
       {rows.length === 0 ? <Empty>No SLOs yet.</Empty> : (
         <Table>

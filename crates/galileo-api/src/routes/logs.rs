@@ -14,6 +14,7 @@ use crate::audit;
 use crate::auth::ProjectAccess;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::perms::Perm;
 
 pub async fn get_pipeline(State(st): State<AppState>, pa: ProjectAccess) -> ApiResult<Json<Value>> {
     let row: Option<(Value,)> = sqlx::query_as("SELECT pipeline FROM log_pipelines WHERE project_id = $1").bind(pa.project.id).fetch_optional(&st.pg).await?;
@@ -22,7 +23,7 @@ pub async fn get_pipeline(State(st): State<AppState>, pa: ProjectAccess) -> ApiR
 }
 
 pub async fn put_pipeline(State(st): State<AppState>, pa: ProjectAccess, Json(p): Json<LogPipeline>) -> ApiResult<Json<Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageIngest)?;
     if p.processors.len() > 50 { return Err(ApiError::BadRequest("at most 50 processors".into())); }
     for pr in &p.processors {
         if let galileo_core::Processor::RegexExtract { pattern, .. } = pr { regex::Regex::new(pattern).map_err(|e| ApiError::BadRequest(format!("bad regex '{pattern}': {e}")))?; }
@@ -63,7 +64,7 @@ pub async fn list_metrics(State(st): State<AppState>, pa: ProjectAccess) -> ApiR
     Ok(Json(json!({ "metrics": rows.into_iter().map(|(id, name, rule, at)| json!({ "id": id, "name": name, "rule": rule, "created_at": at })).collect::<Vec<_>>() })))
 }
 pub async fn create_metric(State(st): State<AppState>, pa: ProjectAccess, Json(m): Json<LogMetric>) -> ApiResult<Json<Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageIngest)?;
     let name = m.name.trim().to_string();
     if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') { return Err(ApiError::BadRequest("name must be alphanumeric with _ or .".into())); }
     let id = Uuid::now_v7();
@@ -74,7 +75,7 @@ pub async fn create_metric(State(st): State<AppState>, pa: ProjectAccess, Json(m
 #[derive(Deserialize)]
 pub struct MetricPath { #[allow(dead_code)] pub project_id: Uuid, pub metric_id: Uuid }
 pub async fn delete_metric(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<MetricPath>) -> ApiResult<Json<Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageIngest)?;
     sqlx::query("DELETE FROM log_metrics WHERE id = $1 AND project_id = $2").bind(p.metric_id).bind(pa.project.id).execute(&st.pg).await?;
     st.resolver.invalidate_all();
     Ok(Json(json!({ "ok": true })))
@@ -113,7 +114,7 @@ pub async fn usage(State(st): State<AppState>, pa: ProjectAccess, QueryParams(p)
 fn num(v: &Value) -> Option<f64> { v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())) }
 
 pub async fn put_quotas(State(st): State<AppState>, pa: ProjectAccess, Json(q): Json<Quotas>) -> ApiResult<Json<Value>> {
-    pa.require_admin()?;
+    pa.require(Perm::ManageIngest)?;
     if !matches!(q.mode.as_str(), "warn" | "hard") { return Err(ApiError::BadRequest("mode must be warn or hard".into())); }
     sqlx::query("INSERT INTO project_settings (project_id, quotas) VALUES ($1, $2) ON CONFLICT (project_id) DO UPDATE SET quotas = $2, updated_at = now()").bind(pa.project.id).bind(serde_json::to_value(&q).unwrap_or_default()).execute(&st.pg).await?;
     st.resolver.invalidate_all();

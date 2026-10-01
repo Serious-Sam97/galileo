@@ -63,6 +63,15 @@ pub async fn get(State(st): State<AppState>, pa: ProjectAccess, Path((_, cid)): 
         "tool_calls": parse_tools(&s(r.get(12))), "prompt": s(r.get(13)).chars().take(1500).collect::<String>(), "completion": s(r.get(14)).chars().take(1500).collect::<String>(),
         "finish_reason": s(r.get(15)), "cache_hit": s(r.get(16)), "guardrail": s(r.get(17)), "ttft_ms": f(r.get(18)), "fallback_index": f(r.get(19)), "app_spans": [],
     })).collect();
+    // Prompts, completions and tool arguments are sensitive.
+    if !pa.can(crate::perms::Perm::ViewSensitive) {
+        for t in out.iter_mut() {
+            t["prompt"] = Value::Null;
+            t["completion"] = Value::Null;
+            t["tool_calls"] = Value::Null;
+            t["redacted"] = Value::Bool(true);
+        }
+    }
     // tool executions and other app spans from the same traces (anything not the gateway itself)
     let trace_ids: Vec<String> = { let mut v: Vec<String> = out.iter().map(|t| t["trace_id"].as_str().unwrap_or("").to_string()).filter(|t| !t.is_empty()).collect(); v.sort(); v.dedup(); v };
     if !trace_ids.is_empty() {

@@ -14,6 +14,7 @@ use crate::audit;
 use crate::auth::ProjectAccess;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::perms::Perm;
 
 // ---------------------------------------------------------------- providers
 
@@ -83,7 +84,7 @@ fn validate_provider(b: &ProviderBody) -> ApiResult<String> {
 }
 
 pub async fn create_provider(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<ProviderBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     let base = validate_provider(&b)?;
     let enc = b.api_key.as_deref().filter(|k| !k.is_empty()).map(|k| galileo_gateway::crypto::encrypt(&st.secret, k));
     let row: ProviderRow = sqlx::query_as(&format!(
@@ -111,7 +112,7 @@ pub struct ProviderPath {
 }
 
 pub async fn update_provider(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<ProviderPath>, Json(b): Json<ProviderBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     let base = validate_provider(&b)?;
     let row: Option<ProviderRow> = match b.api_key.as_deref() {
         None => sqlx::query_as(&format!(
@@ -135,7 +136,7 @@ pub async fn update_provider(State(st): State<AppState>, pa: ProjectAccess, Path
 }
 
 pub async fn delete_provider(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<ProviderPath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     let r = sqlx::query("DELETE FROM gateway_providers WHERE id = $1 AND project_id = $2").bind(p.provider_id).bind(pa.project.id).execute(&st.pg).await?;
     if r.rows_affected() == 0 {
         return Err(ApiError::NotFound("provider"));
@@ -243,7 +244,7 @@ async fn validate_route(st: &AppState, project: Uuid, b: &RouteBody) -> ApiResul
 }
 
 pub async fn create_route(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<RouteBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     validate_route(&st, pa.project.id, &b).await?;
     let row: RouteRow = sqlx::query_as(
         "INSERT INTO gateway_routes (id, project_id, alias, description, targets, budget, rate_limit, enabled) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
@@ -271,7 +272,7 @@ pub struct RoutePath {
 }
 
 pub async fn update_route(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<RoutePath>, Json(b): Json<RouteBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     validate_route(&st, pa.project.id, &b).await?;
     let row: Option<RouteRow> = sqlx::query_as(
         "UPDATE gateway_routes SET alias = $3, description = $4, targets = $5, budget = $6, rate_limit = $7, enabled = $8, updated_at = now() \
@@ -294,7 +295,7 @@ pub async fn update_route(State(st): State<AppState>, pa: ProjectAccess, Path(p)
 }
 
 pub async fn delete_route(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<RoutePath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     let r = sqlx::query("DELETE FROM gateway_routes WHERE id = $1 AND project_id = $2").bind(p.route_id).bind(pa.project.id).execute(&st.pg).await?;
     if r.rows_affected() == 0 {
         return Err(ApiError::NotFound("route"));
@@ -378,7 +379,7 @@ fn validate_content(c: &serde_json::Value) -> ApiResult<()> {
 }
 
 pub async fn create_prompt(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<PromptBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     let name = b.name.trim();
     if name.is_empty() || name.len() > 100 {
         return Err(ApiError::BadRequest("name is required (max 100 chars)".into()));
@@ -440,7 +441,7 @@ pub struct VersionBody {
 }
 
 pub async fn add_prompt_version(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<PromptPath>, Json(b): Json<VersionBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     validate_content(&b.content)?;
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM prompts WHERE id = $1 AND project_id = $2").bind(p.prompt_id).bind(pa.project.id).fetch_one(&st.pg).await?;
     if n == 0 {
@@ -464,7 +465,7 @@ pub async fn add_prompt_version(State(st): State<AppState>, pa: ProjectAccess, P
 }
 
 pub async fn delete_prompt(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<PromptPath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     let r = sqlx::query("DELETE FROM prompts WHERE id = $1 AND project_id = $2").bind(p.prompt_id).bind(pa.project.id).execute(&st.pg).await?;
     if r.rows_affected() == 0 {
         return Err(ApiError::NotFound("prompt"));
@@ -544,7 +545,7 @@ const DEFAULT_RUBRIC: &str = "You are grading an AI assistant's answer. Score 1-
 
 /// LLM-as-judge over a sample of recent completions. Runs inline (bounded sample) and stores per-span scores.
 pub async fn run_eval(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<EvalRunBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     let sample = b.sample_size.clamp(1, 100);
     let rubric = if b.rubric.trim().is_empty() { DEFAULT_RUBRIC.to_string() } else { b.rubric.clone() };
     let run_id = Uuid::now_v7();
@@ -609,7 +610,7 @@ pub async fn list_datasets(State(st): State<AppState>, pa: ProjectAccess) -> Api
 }
 
 pub async fn create_dataset(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<DatasetBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     if b.name.trim().is_empty() { return Err(ApiError::BadRequest("name is required".into())); }
     let id = Uuid::now_v7();
     sqlx::query("INSERT INTO gateway_datasets (id, project_id, name, description, created_by) VALUES ($1, $2, $3, $4, $5)").bind(id).bind(pa.project.id).bind(b.name.trim()).bind(&b.description).bind(pa.user.id).execute(&st.pg).await?;
@@ -623,11 +624,21 @@ pub async fn get_dataset(State(st): State<AppState>, pa: ProjectAccess, Path(p):
     let ds: Option<(serde_json::Value,)> = sqlx::query_as("SELECT row_to_json(d) FROM (SELECT id, name, description, created_at FROM gateway_datasets WHERE id = $1 AND project_id = $2) d").bind(p.dataset_id).bind(pa.project.id).fetch_optional(&st.pg).await?;
     let Some((ds,)) = ds else { return Err(ApiError::NotFound("dataset")); };
     let items: Vec<(serde_json::Value,)> = sqlx::query_as("SELECT row_to_json(i) FROM (SELECT id, input, expected, rubric, source_span, created_at FROM gateway_dataset_items WHERE dataset_id = $1 ORDER BY created_at) i").bind(p.dataset_id).fetch_all(&st.pg).await?;
-    Ok(Json(json!({ "dataset": ds, "items": items.into_iter().map(|r| r.0).collect::<Vec<_>>() })))
+    // Items copied from real calls hold prompt and answer text.
+    let sensitive = pa.can(Perm::ViewSensitive);
+    let items: Vec<serde_json::Value> = items.into_iter().map(|(mut it,)| {
+        if !sensitive && it.get("source_span").and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty()) {
+            it["input"] = serde_json::Value::Null;
+            it["expected"] = serde_json::Value::Null;
+            it["redacted"] = serde_json::Value::Bool(true);
+        }
+        it
+    }).collect();
+    Ok(Json(json!({ "dataset": ds, "items": items })))
 }
 
 pub async fn delete_dataset(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<DatasetPath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     sqlx::query("DELETE FROM gateway_datasets WHERE id = $1 AND project_id = $2").bind(p.dataset_id).bind(pa.project.id).execute(&st.pg).await?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -641,7 +652,7 @@ pub struct ItemsBody {
 }
 
 pub async fn add_items(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<DatasetPath>, Json(b): Json<ItemsBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     let mut added = 0;
     if !b.span_ids.is_empty() {
         let ids: Vec<String> = b.span_ids.into_iter().take(200).collect();
@@ -672,7 +683,7 @@ pub async fn add_items(State(st): State<AppState>, pa: ProjectAccess, Path(p): P
 #[derive(Deserialize)]
 pub struct ItemPath { #[allow(dead_code)] pub project_id: Uuid, pub dataset_id: Uuid, pub item_id: Uuid }
 pub async fn delete_item(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<ItemPath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     sqlx::query("DELETE FROM gateway_dataset_items WHERE id = $1 AND dataset_id IN (SELECT id FROM gateway_datasets WHERE id = $2 AND project_id = $3)").bind(p.item_id).bind(p.dataset_id).bind(pa.project.id).execute(&st.pg).await?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -692,7 +703,7 @@ fn d_min() -> f64 { 3.5 }
 pub struct PromptPatch { #[serde(default)] pub description: Option<String>, #[serde(default)] pub ci: Option<PromptCi> }
 
 pub async fn patch_prompt(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<PromptPath>, Json(b): Json<PromptPatch>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     if let Some(d) = &b.description { sqlx::query("UPDATE prompts SET description = $3 WHERE id = $1 AND project_id = $2").bind(p.prompt_id).bind(pa.project.id).bind(d).execute(&st.pg).await?; }
     if let Some(ci) = &b.ci { sqlx::query("UPDATE prompts SET ci = $3 WHERE id = $1 AND project_id = $2").bind(p.prompt_id).bind(pa.project.id).bind(serde_json::to_value(ci).unwrap_or_default()).execute(&st.pg).await?; }
     Ok(Json(json!({ "ok": true })))
@@ -703,7 +714,7 @@ pub struct PromoteBody { pub version: i32 }
 
 /// Promote a version: it becomes what the gateway serves when the app omits the version.
 pub async fn promote_prompt(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<PromptPath>, Json(b): Json<PromoteBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     let row: Option<(serde_json::Value, String, Option<f64>)> = sqlx::query_as("SELECT pr.ci, pv.ci_status, pv.ci_score FROM prompts pr JOIN prompt_versions pv ON pv.prompt_id = pr.id WHERE pr.id = $1 AND pr.project_id = $2 AND pv.version = $3").bind(p.prompt_id).bind(pa.project.id).bind(b.version).fetch_optional(&st.pg).await?;
     let Some((ci, status, score)) = row else { return Err(ApiError::NotFound("prompt version")); };
     let ci: PromptCi = serde_json::from_value(ci).unwrap_or_default();
@@ -759,7 +770,7 @@ pub async fn run_prompt_ci(st: AppState, project: Uuid, prompt_id: Uuid, version
 pub struct CiRunBody { pub version: i32 }
 /// Re-run CI for a version by hand.
 pub async fn run_ci(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<PromptPath>, Json(b): Json<CiRunBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageAi)?;
     let st2 = st.clone(); let (pid, prid, ver, uid) = (pa.project.id, p.prompt_id, b.version, pa.user.id);
     tokio::spawn(async move { run_prompt_ci(st2, pid, prid, ver, Some(uid)).await; });
     Ok(Json(json!({ "started": true })))

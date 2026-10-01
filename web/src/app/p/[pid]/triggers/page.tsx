@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useProjectId, useProjectQuery, useProjectMutation } from "@/lib/hooks";
+import { useProjectId, useProjectQuery, useProjectMutation, useAccess } from "@/lib/hooks";
 import { post } from "@/lib/api";
 import { Button, Table, Th, Td, Empty, Badge, Drawer, ErrorBox, PageHeader } from "@/components/ui";
 import { TriggerForm, type TriggerDraft, emptyTrigger } from "./form";
@@ -11,6 +11,7 @@ import { ago, fmtDuration, fmtNum } from "@/lib/format";
 import { Plus } from "lucide-react";
 
 export default function TriggersPage() {
+  const access = useAccess();
   const pid = useProjectId();
   const list = useProjectQuery<{ triggers: Trigger[] }>(["triggers"], "/triggers", { refetchInterval: 15_000 });
   const [creating, setCreating] = useState(false);
@@ -18,7 +19,7 @@ export default function TriggersPage() {
   const rows = list.data?.triggers ?? [];
   return (
     <div className="mx-auto max-w-[1400px] space-y-4">
-      <PageHeader title="Triggers" sub="A trigger runs a query on a schedule and notifies when the result crosses a threshold. With breakdowns, the worst group decides." actions={<Button variant="primary" onClick={() => setCreating(true)}><Plus size={14} /> New trigger</Button>} />
+      <PageHeader title="Triggers" sub="A trigger runs a query on a schedule and notifies when the result crosses a threshold. With breakdowns, the worst group decides." actions={access.can("edit_content") && <Button variant="primary" onClick={() => setCreating(true)}><Plus size={14} /> New trigger</Button>} />
       <ErrorBox error={list.error} />
       {rows.length === 0 ? <Empty>No triggers yet.</Empty> : (
         <Table>

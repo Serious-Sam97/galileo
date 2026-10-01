@@ -9,6 +9,7 @@ use crate::auth::{self, ProjectAccess};
 use crate::db::api_keys;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::perms::Perm;
 
 pub async fn list(State(st): State<AppState>, pa: ProjectAccess) -> ApiResult<Json<serde_json::Value>> {
     Ok(Json(json!({ "api_keys": api_keys::list(&st.pg, pa.project.id).await? })))
@@ -43,7 +44,7 @@ fn validate_scopes(scopes: &[String]) -> Result<Vec<String>, ApiError> {
 
 /// The raw key is returned exactly once, here.
 pub async fn create(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<CreateKey>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageIngest)?;
     let scopes = validate_scopes(&b.scopes)?;
     let raw = auth::new_api_key();
     let prefix = raw[..12].to_string();
@@ -60,7 +61,7 @@ pub struct KeyPath {
 }
 
 pub async fn revoke(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<KeyPath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageIngest)?;
     if !api_keys::revoke(&st.pg, pa.project.id, p.key_id).await? {
         return Err(ApiError::NotFound("api key"));
     }

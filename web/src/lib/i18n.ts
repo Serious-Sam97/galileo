@@ -49,6 +49,8 @@ const DICT: Record<string, Record<Locale, string>> = {
   "Error rate": { en: "Error rate", "pt-BR": "Taxa de erros" },
   Services: { en: "Services", "pt-BR": "Serviços" },
   Menu: { en: "Menu", "pt-BR": "Menu" },
+  Accounts: { en: "Accounts", "pt-BR": "Contas" },
+  "Your account": { en: "Your account", "pt-BR": "Sua conta" },
   Watch: { en: "Watch", "pt-BR": "Acompanhar" },
   Explore: { en: "Explore", "pt-BR": "Explorar" },
   Product: { en: "Product", "pt-BR": "Produto" },

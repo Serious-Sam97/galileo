@@ -12,7 +12,7 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
 use crate::auth::{self, CurrentUser};
-use crate::db::users;
+use crate::db::users::User;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -99,25 +99,21 @@ pub async fn oidc_callback(State(st): State<AppState>, headers: HeaderMap, Query
     let email = claims.get("email").and_then(|v| v.as_str()).map(|e| e.trim().to_ascii_lowercase()).ok_or_else(|| ApiError::BadRequest("id_token without email (add the email scope)".into()))?;
     let name = claims.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
     if !cfg.allowed_domains.is_empty() && !cfg.allowed_domains.iter().any(|d| email.ends_with(&format!("@{d}"))) { return Err(ApiError::Forbidden); }
-    // attach or create the user
-    let existing: Option<(uuid::Uuid,)> = sqlx::query_as("SELECT id FROM users WHERE (oidc_issuer = $1 AND oidc_subject = $2) OR email = $3").bind(&cfg.issuer).bind(&sub).bind(&email).fetch_optional(&st.pg).await?;
-    let user_id = match existing {
-        Some((id,)) => { sqlx::query("UPDATE users SET oidc_issuer = $2, oidc_subject = $3 WHERE id = $1").bind(id).bind(&cfg.issuer).bind(&sub).execute(&st.pg).await?; id }
-        None => {
-            let u = users::create(&st.pg, &email, &name, &auth::hash_password(&auth::new_token())?).await?;
-            sqlx::query("UPDATE users SET oidc_issuer = $2, oidc_subject = $3 WHERE id = $1").bind(u.id).bind(&cfg.issuer).bind(&sub).execute(&st.pg).await?;
-            if let Some(org) = cfg.default_org.as_deref().and_then(|o| uuid::Uuid::parse_str(o).ok()) {
-                let role = if matches!(cfg.default_role.as_str(), "admin" | "member" | "viewer") { cfg.default_role.as_str() } else { "member" };
-                let _ = sqlx::query("INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING").bind(org).bind(u.id).bind(role).execute(&st.pg).await;
-            }
-            u.id
-        }
+    // Accounts are created by the Master: SSO signs in an existing, enabled account (matched by its
+    // SSO identity or e-mail) and never creates one.
+    let _ = &name;
+    let existing: Option<User> = sqlx::query_as("SELECT * FROM users WHERE (oidc_issuer = $1 AND oidc_subject = $2) OR email = $3 ORDER BY (oidc_subject = $2) DESC NULLS LAST LIMIT 1")
+        .bind(&cfg.issuer).bind(&sub).bind(&email).fetch_optional(&st.pg).await?;
+    let Some(user) = existing.filter(|u| u.disabled_at.is_none()) else {
+        let to = format!("{}/login?sso=no_account", st.config.public_url.trim_end_matches('/').replace(":8080", ":3000"));
+        let mut resp = Redirect::temporary(&to).into_response();
+        resp.headers_mut().insert(header::SET_COOKIE, HeaderValue::from_static("galileo_oidc=; Path=/api/auth/oidc; Max-Age=0"));
+        return Ok(resp);
     };
-    let token = auth::new_token();
-    let ua = headers.get("user-agent").and_then(|v| v.to_str().ok()).unwrap_or("");
-    users::create_session(&st.pg, user_id, &auth::hash_token(&token), auth::session_expiry(), ua).await?;
+    sqlx::query("UPDATE users SET oidc_issuer = $2, oidc_subject = $3 WHERE id = $1").bind(user.id).bind(&cfg.issuer).bind(&sub).execute(&st.pg).await?;
+    let (cookie, _token) = super::auth::open_session(&st, &user, &headers).await?;
     let mut resp = Redirect::temporary(&format!("{}/", st.config.public_url.trim_end_matches('/').replace(":8080", ":3000"))).into_response();
-    resp.headers_mut().insert(header::SET_COOKIE, auth::session_cookie(&token, auth::secure_cookies(&st.config)));
+    resp.headers_mut().insert(header::SET_COOKIE, cookie);
     resp.headers_mut().append(header::SET_COOKIE, HeaderValue::from_static("galileo_oidc=; Path=/api/auth/oidc; Max-Age=0"));
     Ok(resp)
 }
@@ -177,15 +173,11 @@ pub async fn twofa_status(State(st): State<AppState>, cu: CurrentUser) -> ApiRes
 }
 /// Second step of a password login: email + password + code → session.
 pub async fn twofa_verify(State(st): State<AppState>, headers: HeaderMap, Json(b): Json<CodeBody>) -> ApiResult<Response> {
-    let email = b.email.trim().to_ascii_lowercase();
-    let user = users::by_email(&st.pg, &email).await?.ok_or(ApiError::Unauthorized)?;
-    if !auth::verify_password(&b.password, &user.password_hash) { return Err(ApiError::Unauthorized); }
+    let user = super::auth::check_credentials(&st, &b.email, &b.password).await?;
     let (secret, enabled): (String, bool) = sqlx::query_as("SELECT totp_secret, totp_enabled FROM users WHERE id = $1").bind(user.id).fetch_one(&st.pg).await?;
     if enabled && !totp_ok(&secret, &b.code) { return Err(ApiError::Unauthorized); }
-    let token = auth::new_token();
-    let ua = headers.get("user-agent").and_then(|v| v.to_str().ok()).unwrap_or("");
-    users::create_session(&st.pg, user.id, &auth::hash_token(&token), auth::session_expiry(), ua).await?;
-    Ok((StatusCode::OK, auth::set_cookie_header(auth::session_cookie(&token, auth::secure_cookies(&st.config))), Json(json!({ "user": user, "token": token }))).into_response())
+    let (cookie, token) = super::auth::open_session(&st, &user, &headers).await?;
+    Ok((StatusCode::OK, auth::set_cookie_header(cookie), Json(json!({ "user": user, "token": token, "must_change_password": user.must_change_password }))).into_response())
 }
 
 #[cfg(test)]

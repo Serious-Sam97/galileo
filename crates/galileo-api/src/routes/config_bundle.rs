@@ -12,6 +12,7 @@ use crate::audit;
 use crate::auth::ProjectAccess;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::perms::Perm;
 
 const REDACTED: &str = "<redacted>";
 
@@ -48,6 +49,7 @@ pub struct ExportParams { #[serde(default = "d_fmt")] pub format: String }
 fn d_fmt() -> String { "yaml".into() }
 
 pub async fn export(State(st): State<AppState>, pa: ProjectAccess, QueryParams(p): QueryParams<ExportParams>) -> ApiResult<axum::response::Response> {
+    pa.require(Perm::AuditExport)?;
     let bundle = build_bundle(&st, pa.project.id).await;
     if p.format == "json" { return Ok(Json(bundle).into_response()); }
     let y = serde_yaml::to_string(&bundle).map_err(|e| ApiError::Internal(e.to_string()))?;
@@ -83,7 +85,7 @@ fn diff_section(name: &str, key: &str, current: &[Value], incoming: &[Value], ou
 
 /// Apply a bundle. Matched by name/alias; secrets marked `<redacted>` keep their current value.
 pub async fn import(State(st): State<AppState>, pa: ProjectAccess, QueryParams(p): QueryParams<ImportParams>, body: String) -> ApiResult<Json<Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageProject)?;
     let bundle: Value = serde_json::from_str(&body).or_else(|_| serde_yaml::from_str::<Value>(&body)).map_err(|e| ApiError::BadRequest(format!("bundle must be YAML or JSON: {e}")))?;
     let current = build_bundle(&st, pa.project.id).await;
     let arr = |v: &Value, path: &[&str]| -> Vec<Value> { let mut x = v; for k in path { x = x.get(*k).unwrap_or(&Value::Null); } x.as_array().cloned().unwrap_or_default() };

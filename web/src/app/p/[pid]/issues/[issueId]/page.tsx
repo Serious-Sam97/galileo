@@ -6,7 +6,7 @@ import { post as apiPostA } from "@/lib/api";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { useProjectId, useProjectQuery, useProjectMutation } from "@/lib/hooks";
+import { useProjectId, useProjectQuery, useProjectMutation, useAccess } from "@/lib/hooks";
 import { post } from "@/lib/api";
 import { Badge, Button, Card, Drawer, Empty, ErrorBox, Input, Label, Stat, Table, Th, Td, Textarea } from "@/components/ui";
 import { Chart, axisStyle, type EChartsOption } from "@/components/charts/chart";
@@ -36,6 +36,7 @@ function Breakdown({ title, rows, link }: { title: string; rows: { key: string; 
 }
 
 export default function IssuePage() {
+  const access = useAccess();
   const { issueId } = useParams<{ issueId: string }>();
   const pid = useProjectId();
   const [last, setLast] = useState(86400);
@@ -67,9 +68,9 @@ export default function IssuePage() {
           <div className="mt-0.5 flex flex-wrap gap-3 text-[12px] font-mono text-muted"><span className="text-accent">{i.culprit || i.exception_type}</span><span>{i.route}</span><span>{i.service_name}</span></div>
         </div>
         <div className="flex gap-2">
-          {i.status !== "resolved" && <Button size="sm" variant="primary" onClick={() => setAction("resolve")}>Resolve</Button>}
-          {i.status !== "ignored" && <Button size="sm" onClick={() => setAction("ignore")}>Ignore</Button>}
-          {i.status !== "open" && <Button size="sm" onClick={() => setAction("reopen")}>Reopen</Button>}
+          {access.can("triage_issues") && i.status !== "resolved" && <Button size="sm" variant="primary" onClick={() => setAction("resolve")}>Resolve</Button>}
+          {access.can("triage_issues") && i.status !== "ignored" && <Button size="sm" onClick={() => setAction("ignore")}>Ignore</Button>}
+          {access.can("triage_issues") && i.status !== "open" && <Button size="sm" onClick={() => setAction("reopen")}>Reopen</Button>}
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">

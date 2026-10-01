@@ -8,6 +8,7 @@ use crate::auth::ProjectAccess;
 use crate::db::boards;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::perms::Perm;
 
 #[derive(Deserialize)]
 pub struct BoardPath {
@@ -38,7 +39,7 @@ pub async fn get(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<Bo
 }
 
 pub async fn create(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<Body>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     if !b.panels.is_array() {
         return Err(ApiError::BadRequest("panels must be an array".into()));
     }
@@ -47,7 +48,7 @@ pub async fn create(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json
 }
 
 pub async fn update(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<BoardPath>, Json(b): Json<Body>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     if !b.panels.is_array() {
         return Err(ApiError::BadRequest("panels must be an array".into()));
     }
@@ -58,7 +59,7 @@ pub async fn update(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path
 }
 
 pub async fn delete(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<BoardPath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     if !boards::delete(&st.pg, pa.project.id, p.board_id).await? {
         return Err(ApiError::NotFound("board"));
     }
@@ -72,7 +73,7 @@ pub struct SettingsBody { #[serde(default)] pub variables: Option<serde_json::Va
 
 /// Board-level settings: variables (`[{name, field, default, label}]`), time range, compare.
 pub async fn patch_settings(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<BoardPath>, Json(b): Json<SettingsBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     if let Some(v) = &b.variables { if !v.is_array() { return Err(ApiError::BadRequest("variables must be an array".into())); } }
     let n = sqlx::query("UPDATE boards SET variables = coalesce($3, variables), time_range = CASE WHEN $4::jsonb IS NULL THEN time_range ELSE nullif($4::jsonb, 'null'::jsonb) END, compare = coalesce($5, compare), updated_at = now() WHERE id = $1 AND project_id = $2")
         .bind(p.board_id).bind(pa.project.id).bind(&b.variables).bind(&b.time_range).bind(b.compare).execute(&st.pg).await?.rows_affected();
@@ -113,7 +114,7 @@ fn panel(id: &str, title: &str, viz: &str, query: serde_json::Value, x: u32, y: 
 
 /// One-click boards: RED per service, LLM cost, browser vitals.
 pub async fn create_template(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<TemplateBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     let svc = b.service.clone().filter(|s| !s.is_empty());
     let svc_filter = |extra: Vec<serde_json::Value>| -> serde_json::Value { let mut f = vec![]; if let Some(s) = &svc { f.push(json!({ "field": "service_name", "op": "eq", "value": s })); } f.extend(extra); json!(f) };
     let (name, variables, panels): (String, serde_json::Value, Vec<serde_json::Value>) = match b.kind.as_str() {
@@ -179,6 +180,7 @@ pub async fn list_annotations(State(st): State<AppState>, pa: ProjectAccess, axu
 }
 
 pub async fn create_annotation(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<AnnotationBody>) -> ApiResult<Json<serde_json::Value>> {
+    pa.require(Perm::EditContent)?;
     if b.text.trim().is_empty() { return Err(ApiError::BadRequest("text is required".into())); }
     let id = Uuid::now_v7();
     // @mentions by e-mail in the text resolve to org members
@@ -205,7 +207,7 @@ pub async fn create_annotation(State(st): State<AppState>, pa: ProjectAccess, Js
 #[derive(Deserialize)]
 pub struct AnnotationPath { #[allow(dead_code)] pub project_id: Uuid, pub annotation_id: Uuid }
 pub async fn delete_annotation(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<AnnotationPath>) -> ApiResult<Json<serde_json::Value>> {
-    let n = sqlx::query("DELETE FROM annotations WHERE id = $1 AND project_id = $2 AND (author_id = $3 OR $4)").bind(p.annotation_id).bind(pa.project.id).bind(pa.user.id).bind(pa.role == "owner" || pa.role == "admin").execute(&st.pg).await?.rows_affected();
+    let n = sqlx::query("DELETE FROM annotations WHERE id = $1 AND project_id = $2 AND (author_id = $3 OR $4)").bind(p.annotation_id).bind(pa.project.id).bind(pa.user.id).bind(pa.can(Perm::ManageProject)).execute(&st.pg).await?.rows_affected();
     if n == 0 { return Err(ApiError::NotFound("annotation")); }
     Ok(Json(json!({ "ok": true })))
 }
@@ -232,6 +234,7 @@ pub struct ChannelPath { #[allow(dead_code)] pub project_id: Uuid, pub channel_i
 
 /// POST a PNG (body: image/png bytes; `?caption=`) to a Discord/webhook channel as an attachment.
 pub async fn send_image(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<ChannelPath>, axum::extract::Query(cp): axum::extract::Query<CaptionParams>, body: axum::body::Bytes) -> ApiResult<Json<serde_json::Value>> {
+    pa.require(Perm::EditContent)?;
     let row: Option<(String, serde_json::Value)> = sqlx::query_as("SELECT kind, config FROM notification_channels WHERE id = $1 AND project_id = $2").bind(p.channel_id).bind(pa.project.id).fetch_optional(&st.pg).await?;
     let Some((kind, config)) = row else { return Err(ApiError::NotFound("channel")); };
     let url = config.get("url").and_then(|u| u.as_str()).ok_or_else(|| ApiError::BadRequest("channel has no url".into()))?.to_string();

@@ -15,7 +15,7 @@ export default function OrgOverviewPage() {
   const { orgId } = useParams<{ orgId: string }>();
   const me = useMe();
   const router = useRouter();
-  useEffect(() => { if (me.isError) router.replace("/login"); }, [me.isError, router]);
+  useEffect(() => { if (me.isError) router.replace("/login"); else if (me.data?.user.must_change_password) router.replace("/password"); }, [me.isError, me.data, router]);
   const [last, setLast] = useState(3600);
   const ov = useQuery({ queryKey: ["org-overview", orgId, last], queryFn: () => get<{ projects: OrgProject[] }>(`/api/orgs/${orgId}/overview?last_seconds=${last}`), refetchInterval: 30_000 });
   const org = me.data?.orgs.find((o) => o.id === orgId);

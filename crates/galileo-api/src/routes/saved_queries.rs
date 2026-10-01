@@ -8,6 +8,7 @@ use crate::auth::ProjectAccess;
 use crate::db::saved_queries as sq;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::perms::Perm;
 
 #[derive(Deserialize)]
 pub struct QueryPath {
@@ -38,14 +39,14 @@ pub async fn get(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<Qu
 }
 
 pub async fn create(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<Body>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     validate(&b.query)?;
     let q = sq::create(&st.pg, pa.project.id, b.name.trim(), &b.description, b.query, pa.user.id).await?;
     Ok(Json(json!({ "saved_query": q })))
 }
 
 pub async fn update(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<QueryPath>, Json(b): Json<Body>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     validate(&b.query)?;
     let q = sq::update(&st.pg, pa.project.id, p.query_id, b.name.trim(), &b.description, b.query)
         .await?
@@ -54,7 +55,7 @@ pub async fn update(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path
 }
 
 pub async fn delete(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<QueryPath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     if !sq::delete(&st.pg, pa.project.id, p.query_id).await? {
         return Err(ApiError::NotFound("saved query"));
     }

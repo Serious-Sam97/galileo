@@ -5,6 +5,7 @@ pub mod audit;
 pub mod auth;
 pub mod db;
 pub mod error;
+pub mod perms;
 pub mod resolver;
 pub mod routes;
 pub mod state;

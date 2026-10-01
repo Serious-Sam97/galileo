@@ -10,7 +10,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
-import { Activity, BarChart3, Bot, Bug, Gauge, LayoutDashboard, ListTree, ScrollText, Settings, Siren, Target, LogOut, Globe, Share2, Search, Menu, Sparkles, Clock } from "lucide-react";
+import { Activity, BarChart3, Bot, Bug, Gauge, LayoutDashboard, ListTree, ScrollText, Settings, Siren, Target, LogOut, Globe, Share2, Search, Menu, Sparkles, Clock, Users } from "lucide-react";
 import { useProjectQuery } from "@/lib/hooks";
 import { useMe, useProjectId } from "@/lib/hooks";
 import { post } from "@/lib/api";
@@ -38,6 +38,7 @@ const NAV_GROUPS = [
   { label: "Build", items: [
     { href: "boards", label: "Boards", icon: Activity },
     { href: "settings", label: "Settings", icon: Settings },
+    { href: "accounts", label: "Accounts", icon: Users, master: true },
   ] },
 ];
 const NAV = NAV_GROUPS.flatMap((g) => g.items);
@@ -62,7 +63,9 @@ function Shell({ children }: { children: React.ReactNode }) {
   const [unseen, setUnseen] = useState(false);
   useEffect(() => {
     if (me.isError) router.replace("/login");
-  }, [me.isError, router]);
+    // A temporary password allows nothing but choosing a new one.
+    else if (me.data?.user.must_change_password) router.replace("/password");
+  }, [me.isError, me.data, router]);
   useEffect(() => {
     const check = () => { try { setUnseen(localStorage.getItem(SEEN_KEY) !== LATEST_VERSION); } catch { setUnseen(false); } };
     check(); window.addEventListener("galileo-changelog", check); return () => window.removeEventListener("galileo-changelog", check);
@@ -80,7 +83,8 @@ function Shell({ children }: { children: React.ReactNode }) {
   const section = path.split("/")[3] ?? "overview";
   const issueCounts = useProjectQuery<{ counts: Record<string, number> }>(["issue-counts"], "/issues?status=open&last_seconds=60", { refetchInterval: 60_000 });
   const openIssues = issueCounts.data?.counts?.open ?? 0;
-  const sectionLabel = NAV.find((n) => n.href === section)?.label ?? (section === "changelog" ? "What's new" : section === "welcome" ? "Get started" : section);
+  const sectionLabel = NAV.find((n) => n.href === section)?.label ?? (section === "changelog" ? "What's new" : section === "welcome" ? "Get started" : section === "account" ? "Your account" : section);
+  const isMaster = !!me.data?.user.is_master;
 
   // The browser tab names the page and the project, and counts open issues: "(7) Overview · melea · Galileo".
   useEffect(() => {
@@ -113,7 +117,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           {NAV_GROUPS.map((g) => (
             <div key={g.label} className="pt-3">
               <div className="px-5 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-faint">{t(g.label)}</div>
-              {g.items.map((n) => {
+              {g.items.filter((n) => !("master" in n) || isMaster).map((n) => {
                 const active = section === n.href;
                 const Icon = n.icon;
                 return (
@@ -140,11 +144,13 @@ function Shell({ children }: { children: React.ReactNode }) {
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-panel-3 text-[12px] font-semibold text-fg">{(me.data?.user.email ?? "?").slice(0, 1).toUpperCase()}</span>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-fg">{me.data?.user.email}</div>
-              {org && <div className="truncate text-[11px] text-faint">{org.name}</div>}
-            </div>
+            <Link href={`/p/${pid}/account`} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg p-1 -m-1 hover:bg-panel-2" title="Your account">
+              <span className={clsx("flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold", isMaster ? "bg-gradient-to-br from-accent to-accent-2 text-accent-fg" : "bg-panel-3 text-fg")}>{(me.data?.user.name || me.data?.user.email || "?").slice(0, 1).toUpperCase()}</span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-fg">{me.data?.user.name || me.data?.user.email}</div>
+                <div className="truncate text-[11px] text-faint">{isMaster ? "Master" : org?.name}</div>
+              </div>
+            </Link>
             <button title={t("Sign out")} aria-label={t("Sign out")} onClick={async () => { await post("/api/auth/logout"); router.replace("/login"); }} className="rounded-md p-1 hover:text-fg hover:bg-panel-2"><LogOut size={14} /></button>
           </div>
         </div>

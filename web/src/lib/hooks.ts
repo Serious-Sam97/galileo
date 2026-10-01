@@ -57,3 +57,13 @@ export function useProjectMutation<TIn, TOut = unknown>(fn: (pid: string, input:
     onSuccess: () => invalidate.forEach((k) => qc.invalidateQueries({ queryKey: [pid, ...k] })),
   });
 }
+
+export type PermKey = "view_sensitive" | "edit_content" | "triage_issues" | "manage_ai" | "manage_ingest" | "manage_project" | "manage_members" | "audit_export" | "manage_org";
+
+/** What the signed-in user may do in the current project. The server enforces it; the UI uses it to
+ *  hide what would only answer "forbidden". */
+export function useAccess() {
+  const q = useProjectQuery<{ role: string; permissions: PermKey[]; is_master: boolean }>(["access"], "", { refetchInterval: 5 * 60_000 });
+  const perms = new Set(q.data?.permissions ?? []);
+  return { loaded: !!q.data, role: q.data?.role, isMaster: !!q.data?.is_master, can: (p: PermKey) => perms.has(p) };
+}

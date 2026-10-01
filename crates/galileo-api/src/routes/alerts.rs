@@ -14,6 +14,7 @@ use crate::audit;
 use crate::auth::ProjectAccess;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::perms::Perm;
 
 // ---------------------------------------------------------------- triggers
 
@@ -106,7 +107,7 @@ pub async fn list_triggers(State(st): State<AppState>, pa: ProjectAccess) -> Api
 }
 
 pub async fn create_trigger(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<TriggerBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     validate_trigger(&b)?;
     let mute_until = b.mute_hours.filter(|h| *h > 0.0).map(|h| Utc::now() + chrono::Duration::seconds((h * 3600.0) as i64));
     let row: TriggerRow = sqlx::query_as(
@@ -160,7 +161,7 @@ pub async fn get_trigger(State(st): State<AppState>, pa: ProjectAccess, Path(p):
 }
 
 pub async fn update_trigger(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<TriggerPath>, Json(b): Json<TriggerBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     validate_trigger(&b)?;
     let mute_until = b.mute_hours.map(|h| if h > 0.0 { Some(Utc::now() + chrono::Duration::seconds((h * 3600.0) as i64)) } else { None });
     let row: Option<TriggerRow> = sqlx::query_as(
@@ -177,7 +178,7 @@ pub async fn update_trigger(State(st): State<AppState>, pa: ProjectAccess, Path(
 }
 
 pub async fn delete_trigger(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<TriggerPath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     let r = sqlx::query("DELETE FROM triggers WHERE id = $1 AND project_id = $2").bind(p.trigger_id).bind(pa.project.id).execute(&st.pg).await?;
     if r.rows_affected() == 0 {
         return Err(ApiError::NotFound("trigger"));
@@ -288,7 +289,7 @@ pub async fn list_slos(State(st): State<AppState>, pa: ProjectAccess) -> ApiResu
 }
 
 pub async fn create_slo(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<SloBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     validate_slo(&b)?;
     let row: SloRow = sqlx::query_as(
         "INSERT INTO slos (id, project_id, name, description, dataset, total_filters, good_filters, target_pct, window_days, burn_alerts) \
@@ -326,7 +327,7 @@ pub async fn get_slo(State(st): State<AppState>, pa: ProjectAccess, Path(p): Pat
 }
 
 pub async fn update_slo(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<SloPath>, Json(b): Json<SloBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     validate_slo(&b)?;
     let row: Option<SloRow> = sqlx::query_as(
         "UPDATE slos SET name = $3, description = $4, dataset = $5, total_filters = $6, good_filters = $7, target_pct = $8, window_days = $9, burn_alerts = $10, \
@@ -340,7 +341,7 @@ pub async fn update_slo(State(st): State<AppState>, pa: ProjectAccess, Path(p): 
 }
 
 pub async fn delete_slo(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<SloPath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     let r = sqlx::query("DELETE FROM slos WHERE id = $1 AND project_id = $2").bind(p.slo_id).bind(pa.project.id).execute(&st.pg).await?;
     if r.rows_affected() == 0 {
         return Err(ApiError::NotFound("slo"));
@@ -372,6 +373,7 @@ pub struct IncidentPath { #[allow(dead_code)] pub project_id: Uuid, #[allow(dead
 pub struct AckBody { #[serde(default)] pub note: String }
 
 pub async fn ack_incident(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<IncidentPath>, Json(b): Json<AckBody>) -> ApiResult<Json<serde_json::Value>> {
+    pa.require(Perm::TriageIssues)?;
     let n = sqlx::query("UPDATE trigger_incidents SET acknowledged_at = now(), acknowledged_by = $3, notes = CASE WHEN $4 = '' THEN notes ELSE notes || $4 END WHERE id = $1 AND project_id = $2 AND acknowledged_at IS NULL").bind(p.incident_id).bind(pa.project.id).bind(&pa.user.email).bind(&b.note).execute(&st.pg).await?.rows_affected();
     Ok(Json(json!({ "ok": n > 0 })))
 }
@@ -418,7 +420,7 @@ pub struct MuteGroupBody { pub group_key: String, #[serde(default = "d_hours")] 
 fn d_hours() -> f64 { 24.0 }
 
 pub async fn mute_group(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<TriggerPath>, Json(b): Json<MuteGroupBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     let cur: Option<(serde_json::Value,)> = sqlx::query_as("SELECT mutes FROM triggers WHERE id = $1 AND project_id = $2").bind(p.trigger_id).bind(pa.project.id).fetch_optional(&st.pg).await?;
     let Some((cur,)) = cur else { return Err(ApiError::NotFound("trigger")); };
     let mut list: Vec<serde_json::Value> = cur.as_array().cloned().unwrap_or_default().into_iter().filter(|m| m.get("group_key").and_then(|g| g.as_str()) != Some(b.group_key.as_str())).collect();
@@ -435,7 +437,7 @@ pub async fn list_windows(State(st): State<AppState>, pa: ProjectAccess) -> ApiR
     Ok(Json(json!({ "windows": rows.into_iter().map(|r| r.0).collect::<Vec<_>>() })))
 }
 pub async fn create_window(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<WindowBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     if b.ends_at <= b.starts_at { return Err(ApiError::BadRequest("ends_at must be after starts_at".into())); }
     let id = Uuid::now_v7();
     sqlx::query("INSERT INTO maintenance_windows (id, project_id, name, starts_at, ends_at, trigger_ids, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)").bind(id).bind(pa.project.id).bind(b.name.trim()).bind(b.starts_at).bind(b.ends_at).bind(&b.trigger_ids).bind(pa.user.id).execute(&st.pg).await?;
@@ -444,7 +446,7 @@ pub async fn create_window(State(st): State<AppState>, pa: ProjectAccess, Json(b
 #[derive(Deserialize)]
 pub struct WindowPath { #[allow(dead_code)] pub project_id: Uuid, pub window_id: Uuid }
 pub async fn delete_window(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<WindowPath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     sqlx::query("DELETE FROM maintenance_windows WHERE id = $1 AND project_id = $2").bind(p.window_id).bind(pa.project.id).execute(&st.pg).await?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -464,7 +466,7 @@ pub async fn list_oncall(State(st): State<AppState>, pa: ProjectAccess) -> ApiRe
     Ok(Json(json!({ "schedules": out })))
 }
 pub async fn create_oncall(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<OncallBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     if b.members.is_empty() { return Err(ApiError::BadRequest("at least one member".into())); }
     let id = Uuid::now_v7();
     sqlx::query("INSERT INTO oncall_schedules (id, project_id, name, members, rotation_days, starts_on, escalation) VALUES ($1, $2, $3, $4, $5, $6, $7)").bind(id).bind(pa.project.id).bind(b.name.trim()).bind(&b.members).bind(b.rotation_days.max(1)).bind(b.starts_on).bind(if b.escalation.is_array() { b.escalation.clone() } else { json!([]) }).execute(&st.pg).await?;
@@ -473,12 +475,12 @@ pub async fn create_oncall(State(st): State<AppState>, pa: ProjectAccess, Json(b
 #[derive(Deserialize)]
 pub struct OncallPath { #[allow(dead_code)] pub project_id: Uuid, pub schedule_id: Uuid }
 pub async fn update_oncall(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<OncallPath>, Json(b): Json<OncallBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     sqlx::query("UPDATE oncall_schedules SET name = $3, members = $4, rotation_days = $5, starts_on = $6, escalation = $7 WHERE id = $1 AND project_id = $2").bind(p.schedule_id).bind(pa.project.id).bind(b.name.trim()).bind(&b.members).bind(b.rotation_days.max(1)).bind(b.starts_on).bind(if b.escalation.is_array() { b.escalation.clone() } else { json!([]) }).execute(&st.pg).await?;
     Ok(Json(json!({ "ok": true })))
 }
 pub async fn delete_oncall(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<OncallPath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::EditContent)?;
     sqlx::query("DELETE FROM oncall_schedules WHERE id = $1 AND project_id = $2").bind(p.schedule_id).bind(pa.project.id).execute(&st.pg).await?;
     Ok(Json(json!({ "ok": true })))
 }

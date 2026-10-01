@@ -10,6 +10,7 @@ use crate::auth::ProjectAccess;
 use crate::db::rules;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::perms::Perm;
 
 pub async fn list(State(st): State<AppState>, pa: ProjectAccess) -> ApiResult<Json<serde_json::Value>> {
     Ok(Json(json!({
@@ -26,7 +27,7 @@ pub struct CreateRule {
 }
 
 pub async fn create(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<CreateRule>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageIngest)?;
     Redactor::compile(std::slice::from_ref(&b.rule)).map_err(|e| ApiError::BadRequest(format!("invalid rule: {e}")))?;
     let row = rules::create(&st.pg, pa.project.id, serde_json::to_value(&b.rule).unwrap(), &b.description).await?;
     st.resolver.invalidate_all();
@@ -42,7 +43,7 @@ pub struct RulePath {
 }
 
 pub async fn delete(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<RulePath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+    pa.require(Perm::ManageIngest)?;
     if !rules::delete(&st.pg, pa.project.id, p.rule_id).await? {
         return Err(ApiError::NotFound("rule"));
     }

@@ -15,6 +15,7 @@ use crate::audit;
 use crate::auth::ProjectAccess;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::perms::Perm;
 
 #[derive(Deserialize)]
 pub struct ListParams {
@@ -118,7 +119,7 @@ pub async fn get(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<Is
 pub struct StatusBody { #[serde(default)] pub note: String, #[serde(default)] pub version: String }
 
 async fn set_status(st: &AppState, pa: &ProjectAccess, id: Uuid, status: &str, kind: &str, b: &StatusBody) -> ApiResult<IssueRow> {
-    pa.require_write()?;
+    pa.require(Perm::TriageIssues)?;
     let issue = load(st, pa.project.id, id).await?;
     let row: IssueRow = sqlx::query_as(
         "UPDATE issues SET status = $2, resolved_at = CASE WHEN $2 = 'resolved' THEN now() ELSE NULL END, resolved_version = CASE WHEN $2 = 'resolved' THEN $3 ELSE '' END, \
@@ -148,7 +149,7 @@ pub async fn get_settings(State(st): State<AppState>, pa: ProjectAccess) -> ApiR
 }
 
 pub async fn put_settings(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<SettingsBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_admin()?;
+    pa.require(Perm::ManageProject)?;
     if !b.issue_recipients.is_array() { return Err(ApiError::BadRequest("issue_recipients must be an array".into())); }
     sqlx::query("INSERT INTO project_settings (project_id, issue_recipients) VALUES ($1, $2) ON CONFLICT (project_id) DO UPDATE SET issue_recipients = $2, updated_at = now()")
         .bind(pa.project.id).bind(&b.issue_recipients).execute(&st.pg).await?;
@@ -168,7 +169,7 @@ pub async fn list_deploys(State(st): State<AppState>, pa: ProjectAccess, QueryPa
     Ok(Json(json!({ "deploys": rows })))
 }
 
-/// Who may record a deploy: a signed-in member with write access, or — for CI — a project API
+/// Who may record a deploy: a signed-in member who may edit content, or — for CI — a project API
 /// key with the `deploy` scope, so pipelines do not need a personal token.
 pub enum DeployActor {
     User(ProjectAccess),
@@ -182,7 +183,7 @@ impl axum::extract::FromRequestParts<AppState> for DeployActor {
         let bearer = parts.headers.get(axum::http::header::AUTHORIZATION).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")).map(|v| v.trim().to_owned());
         let Some(raw) = bearer.filter(|k| k.starts_with("glk_")) else {
             let pa = ProjectAccess::from_request_parts(parts, st).await?;
-            pa.require_write()?;
+            pa.require(Perm::EditContent)?;
             return Ok(DeployActor::User(pa));
         };
         let Path(DeployPath { project_id }) = Path::<DeployPath>::from_request_parts(parts, st).await.map_err(|_| ApiError::BadRequest("invalid project id".into()))?;

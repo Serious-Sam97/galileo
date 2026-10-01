@@ -18,6 +18,7 @@ pub mod search;
 pub mod openapi;
 pub mod sso;
 pub mod members;
+pub mod admin;
 pub mod config_bundle;
 pub mod projects;
 pub mod query;
@@ -35,6 +36,17 @@ pub fn api_router() -> Router<AppState> {
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
         .route("/auth/setup", get(auth::setup_status))
+        .route("/auth/password", post(auth::change_password))
+        .route("/auth/sessions", get(auth::sessions))
+        .route("/auth/sessions/{id}", delete(auth::revoke_session))
+        // accounts (Master only)
+        .route("/admin/users", get(admin::list_users).post(admin::create_user))
+        .route("/admin/catalog", get(admin::catalog))
+        .route("/admin/users/{user_id}", axum::routing::patch(admin::patch_user).delete(admin::delete_user))
+        .route("/admin/users/{user_id}/reset-password", post(admin::reset_password))
+        .route("/admin/users/{user_id}/orgs/{org_id}", put(admin::set_org_role))
+        .route("/admin/users/{user_id}/projects/{project_id}", put(admin::set_project_role))
+        .route("/admin/users/{user_id}/permissions", get(admin::get_permissions).put(admin::put_permissions))
         .route("/auth/oidc", get(sso::oidc_config))
         .route("/auth/oidc/start", get(sso::oidc_start))
         .route("/auth/oidc/callback", get(sso::oidc_callback))

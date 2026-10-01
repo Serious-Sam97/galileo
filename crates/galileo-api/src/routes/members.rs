@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::ProjectAccess;
 use crate::error::{ApiError, ApiResult};
+use crate::perms::Perm;
 use crate::state::AppState;
 
 /// Map (org role, project role) → effective role.
@@ -32,7 +33,7 @@ pub async fn list(State(st): State<AppState>, pa: ProjectAccess) -> ApiResult<Js
     let rows: Vec<(Uuid, String, String, String, Option<String>)> = sqlx::query_as(
         "SELECT u.id, u.email, u.name, m.role AS org_role, pm.role AS project_role FROM org_members m JOIN users u ON u.id = m.user_id \
          LEFT JOIN project_members pm ON pm.user_id = u.id AND pm.project_id = $2 WHERE m.org_id = $1 ORDER BY u.email").bind(pa.project.org_id).bind(pa.project.id).fetch_all(&st.pg).await?;
-    Ok(Json(json!({ "members": rows.into_iter().map(|(id, email, name, org_role, project_role)| json!({ "user_id": id, "email": email, "name": name, "org_role": org_role, "project_role": project_role, "effective": effective_role(&org_role, project_role.as_deref()) })).collect::<Vec<_>>(), "my_role": pa.role })))
+    Ok(Json(json!({ "members": rows.into_iter().map(|(id, email, name, org_role, project_role)| json!({ "user_id": id, "email": email, "name": name, "org_role": org_role, "project_role": project_role, "effective": effective_role(&org_role, project_role.as_deref()) })).collect::<Vec<_>>(), "my_role": pa.role, "my_permissions": pa.perms.keys() })))
 }
 
 #[derive(Deserialize)]
@@ -41,7 +42,7 @@ pub struct RoleBody { pub role: String }
 pub struct MemberPath { #[allow(dead_code)] pub project_id: Uuid, pub user_id: Uuid }
 
 pub async fn set_role(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<MemberPath>, Json(b): Json<RoleBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_admin()?;
+    pa.require(Perm::ManageMembers)?;
     if !matches!(b.role.as_str(), "viewer" | "editor" | "admin") { return Err(ApiError::BadRequest("role must be viewer, editor or admin".into())); }
     let in_org: Option<(String,)> = sqlx::query_as("SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2").bind(pa.project.org_id).bind(p.user_id).fetch_optional(&st.pg).await?;
     if in_org.is_none() { return Err(ApiError::BadRequest("user is not a member of the organization".into())); }
@@ -51,7 +52,7 @@ pub async fn set_role(State(st): State<AppState>, pa: ProjectAccess, Path(p): Pa
 }
 
 pub async fn clear_role(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path<MemberPath>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_admin()?;
+    pa.require(Perm::ManageMembers)?;
     sqlx::query("DELETE FROM project_members WHERE project_id = $1 AND user_id = $2").bind(pa.project.id).bind(p.user_id).execute(&st.pg).await?;
     audit::project(&st.pg, &pa, "project.member.clear", "user", p.user_id, json!({})).await;
     Ok(Json(json!({ "ok": true })))
