@@ -34,6 +34,13 @@ impl TraceContext {
         Self { trace_id: TraceId::random(), parent_span_id: None, sampled: true }
     }
 
+    /// Parent to store on the gateway span. Every call is recorded (cost and usage must stay
+    /// complete), but when the caller's trace was not sampled its spans were never exported, so
+    /// linking to that parent would leave an orphan; the call becomes the root of its trace instead.
+    pub fn recorded_parent(&self) -> Option<SpanId> {
+        self.parent_span_id.filter(|_| self.sampled)
+    }
+
     pub fn traceparent(&self, span_id: SpanId) -> String {
         format!("00-{}-{}-01", self.trace_id.to_hex(), span_id.to_hex())
     }
@@ -186,7 +193,7 @@ impl CallRecord {
             project_id: self.project_id,
             trace_id: self.ctx.trace_id,
             span_id: self.span_id,
-            parent_span_id: self.ctx.parent_span_id,
+            parent_span_id: self.ctx.recorded_parent(),
             name: format!("{} {}", self.operation, if o.model.is_empty() { &self.request_model } else { &o.model }),
             kind: SpanKind::Client,
             start_time: self.started,
@@ -246,5 +253,14 @@ mod tests {
         let fresh = TraceContext::from_header(Some("garbage"));
         assert!(fresh.parent_span_id.is_none());
         assert!(!fresh.trace_id.is_zero());
+    }
+
+    #[test]
+    fn unsampled_parent_is_not_linked() {
+        let sampled = TraceContext::from_header(Some("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"));
+        assert!(sampled.recorded_parent().is_some());
+        let dropped = TraceContext::from_header(Some("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"));
+        assert!(dropped.recorded_parent().is_none());
+        assert_eq!(dropped.trace_id.to_hex(), "4bf92f3577b34da6a3ce929d0e0e4736");
     }
 }

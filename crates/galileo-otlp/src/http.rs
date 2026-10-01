@@ -4,7 +4,7 @@
 use std::sync::atomic::Ordering;
 
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -46,6 +46,9 @@ impl OtlpHttp {
             .route("/v1/logs", post(logs))
             .route("/v1/metrics", post(metrics))
             .route("/healthz", get(|| async { "ok" }))
+            // axum's extractor applies its own 2 MB default *after* decompression; without raising it
+            // every batch over 2 MB (gzip or not) gets a 413 that SDKs treat as permanent and drop.
+            .layer(DefaultBodyLimit::max(MAX_BODY))
             .layer(RequestDecompressionLayer::new().gzip(true))
             .layer(RequestBodyLimitLayer::new(MAX_BODY))
             // Browsers (galileo-rum) post straight here from any page origin.
@@ -399,5 +402,18 @@ mod tests {
             .body(Body::from("x"))
             .unwrap();
         assert_eq!(app.oneshot(bad_ct).await.unwrap().status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    #[tokio::test]
+    async fn accepts_batches_over_two_megabytes() {
+        let (app, _storage, _pid) = setup();
+        let pad = "x".repeat(3 * 1024 * 1024);
+        let body = serde_json::json!({ "resourceSpans": [{ "resource": { "attributes": [{ "key": "pad", "value": { "stringValue": pad } }] }, "scopeSpans": [] }] });
+        let req = Request::post("/v1/traces")
+            .header("content-type", "application/json")
+            .header("authorization", "Bearer k1")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        assert_eq!(app.oneshot(req).await.unwrap().status(), StatusCode::OK);
     }
 }

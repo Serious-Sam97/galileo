@@ -7,6 +7,7 @@ use OpenTelemetry\API\Globals;
 use OpenTelemetry\API\Trace\SpanKind;
 use OpenTelemetry\API\Trace\StatusCode;
 use OpenTelemetry\API\Trace\TracerInterface;
+use OpenTelemetry\API\Trace\Propagation\TraceContextPropagator;
 use OpenTelemetry\Contrib\Otlp\LogsExporter;
 use OpenTelemetry\Contrib\Otlp\OtlpHttpTransportFactory;
 use OpenTelemetry\Contrib\Otlp\SpanExporter;
@@ -49,7 +50,9 @@ final class Galileo
         self::$loggerProvider = LoggerProvider::builder()->setResource($resource)
             ->addLogRecordProcessor(new BatchLogRecordProcessor(new LogsExporter($tf->create($endpoint . '/v1/logs', 'application/x-protobuf', $headers)), \OpenTelemetry\SDK\Common\Time\ClockFactory::getDefault()))
             ->build();
-        Sdk::builder()->setTracerProvider($tracerProvider)->setLoggerProvider(self::$loggerProvider)->setAutoShutdown(true)->buildAndRegisterGlobal();
+        // W3C trace context: without it the SDK's propagator is a no-op, so incoming `traceparent`
+        // (browser, other services) is ignored and nothing is propagated to outgoing calls.
+        Sdk::builder()->setTracerProvider($tracerProvider)->setLoggerProvider(self::$loggerProvider)->setPropagator(TraceContextPropagator::getInstance())->setAutoShutdown(true)->buildAndRegisterGlobal();
         self::$tracer = $tracerProvider->getTracer('galileo-php', '0.1.0');
     }
 

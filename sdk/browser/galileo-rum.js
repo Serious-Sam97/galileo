@@ -1,5 +1,5 @@
 /*! galileo-rum 0.1.0 — browser telemetry for Galileo (page loads, route changes, fetch/XHR, JS errors, Web Vitals).
- *  <script src="https://galileo.example.com/rum.js" data-key="glk_…" data-service="my-web" data-endpoint="https://galileo.example.com:4318" data-propagate="https://api.example.com"></script>
+ *  <script src="https://galileo.example.com/rum.js" data-key="glk_…" data-service="my-web" data-endpoint="https://galileo-api.example.com/otlp" data-propagate="https://api.example.com"></script>
  *  or window.galileoRum.init({ key, service, endpoint, propagate: [origins], user, version, env }).
  *  Sends OTLP/JSON. Fetches to same-origin and `propagate` origins carry `traceparent`, so the backend span joins the page's trace. */
 (function (w, d) {
@@ -218,7 +218,9 @@
     var scriptOrigin = (function () { try { return new URL(el.src, d.baseURI).origin; } catch (e) { return w.location.origin; } })();
     cfg = {
       key: opts.key || ds.key || '', service: opts.service || ds.service || 'browser',
-      endpoint: (opts.endpoint || ds.endpoint || scriptOrigin.replace(/:\d+$/, '') + ':4318').replace(/\/$/, ''),
+      // default: the OTLP receiver next to the API that served this script — its own port when
+      // served straight from :8080 (local), the proxy's /otlp path otherwise (hosted).
+      endpoint: (opts.endpoint || ds.endpoint || (/:8080$/.test(scriptOrigin) ? scriptOrigin.replace(/:8080$/, ':4318') : scriptOrigin + '/otlp')).replace(/\/$/, ''),
       propagate: opts.propagate || (ds.propagate ? ds.propagate.split(/[ ,]+/) : []), version: opts.version || ds.version, env: opts.env || ds.env
     };
     cfg.propagate = cfg.propagate.map(function (o) { try { return new URL(o).origin; } catch (e) { return o; } });

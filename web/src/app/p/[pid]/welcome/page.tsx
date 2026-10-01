@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import { Check, Loader2 } from "lucide-react";
-import { get, post, API_BASE } from "@/lib/api";
+import { get, post, API_BASE, OTLP_BASE } from "@/lib/api";
 import { useProjectId, useProjectQuery, useProjectMutation } from "@/lib/hooks";
 import { Button, Card, ErrorBox } from "@/components/ui";
 import { useT } from "@/lib/i18n";
@@ -13,7 +13,7 @@ import { useT } from "@/lib/i18n";
 type Stack = "django" | "python" | "node" | "php" | "rust" | "android" | "browser";
 const STACKS: { id: Stack; label: string; hint: string }[] = [
   { id: "django", label: "Django", hint: "galileo-django" },
-  { id: "python", label: "Python (FastAPI, Flask…)", hint: "galileo" },
+  { id: "python", label: "Python (FastAPI, Flask…)", hint: "galileo-python" },
   { id: "node", label: "Node.js", hint: "@galileo/node" },
   { id: "php", label: "PHP / Laravel", hint: "galileo/php" },
   { id: "rust", label: "Rust", hint: "galileo crate" },
@@ -21,16 +21,15 @@ const STACKS: { id: Stack; label: string; hint: string }[] = [
   { id: "browser", label: "Browser", hint: "galileo-rum.js" },
 ];
 
-function snippet(stack: Stack, key: string, host: string): string {
-  const otlp = host.replace(":8080", ":4318");
+function snippet(stack: Stack, key: string, host: string, otlp: string): string {
   switch (stack) {
-    case "django": return `pip install galileo-django\n\n# settings.py\nINSTALLED_APPS += ["galileo_django"]\nMIDDLEWARE = ["galileo_django.middleware.GalileoMiddleware", *MIDDLEWARE]\nGALILEO = {"endpoint": "${otlp}", "api_key": "${key}", "service_name": "my-api"}`;
-    case "python": return `pip install galileo\n\nimport galileo\ngalileo.init(endpoint="${otlp}", api_key="${key}", service_name="my-api")\n# FastAPI: galileo.fastapi.instrument(app)   Flask: galileo.flask.instrument(app)`;
-    case "node": return `npm i @galileo/node\n\n// first line of your entry file (or node --import @galileo/node/register)\nimport { init } from "@galileo/node";\ninit({ endpoint: "${otlp}", apiKey: "${key}", serviceName: "my-api" });`;
-    case "php": return `composer require galileo/php\n\n// bootstrap\n\\Galileo\\Galileo::init(['endpoint' => '${otlp}', 'api_key' => '${key}', 'service_name' => 'my-api']);\n// Laravel: add Galileo\\Laravel\\GalileoServiceProvider and set GALILEO_API_KEY in .env`;
-    case "rust": return `cargo add galileo\n\nlet _guard = galileo::init(galileo::Config { endpoint: "${otlp}".into(), api_key: "${key}".into(), service_name: "my-api".into(), ..Default::default() });\n// axum: .layer(axum::middleware::from_fn(galileo::axum::middleware))`;
-    case "android": return `// build.gradle: implementation("dev.galileo:galileo-android:0.1")\nGalileo.init(this, Galileo.Config(endpoint = "${otlp}", apiKey = "${key}", serviceName = "my-app"))\n// OkHttp: .addInterceptor(GalileoInterceptor())`;
-    case "browser": return `<script src="${host}/rum.js" data-key="${key}" data-service="my-site"></script>`;
+    case "django": return `pip install ./sdk/python   # galileo-django\n\n# settings.py\nINSTALLED_APPS += ["galileo_django"]\nMIDDLEWARE = ["galileo_django.middleware.GalileoContextMiddleware", *MIDDLEWARE]\n\n# environment\nGALILEO_OTLP_ENDPOINT=${otlp}\nGALILEO_API_KEY=${key}\nOTEL_SERVICE_NAME=my-api`;
+    case "python": return `pip install ./sdk/python-generic   # galileo-python\n\nimport galileo\ngalileo.init(endpoint="${otlp}", api_key="${key}", service="my-api")\n# FastAPI: from galileo.fastapi import GalileoMiddleware; app.add_middleware(GalileoMiddleware)\n# Flask:   import galileo.flask; galileo.flask.instrument(app)`;
+    case "node": return `npm i ./sdk/node   # @galileo/node\n\n// first line of your entry file (or node --import @galileo/node/register)\nimport { init } from "@galileo/node";\ninit({ endpoint: "${otlp}", apiKey: "${key}", service: "my-api" });`;
+    case "php": return `composer require galileo/php\n\n// bootstrap\n\\Galileo\\Galileo::init(['endpoint' => '${otlp}', 'api_key' => '${key}', 'service' => 'my-api']);\n// Laravel: add Galileo\\Laravel\\GalileoServiceProvider and set GALILEO_ENDPOINT / GALILEO_API_KEY in .env`;
+    case "rust": return `# Cargo.toml: galileo = { path = "…/galileo/sdk/rust/galileo" }\n\nlet _guard = galileo::init(galileo::Config::from_env().endpoint("${otlp}").api_key("${key}").service("my-api"));\n// axum: .layer(axum::middleware::from_fn(galileo::axum::middleware))`;
+    case "android": return `// sdk/android/galileo (AAR)\nGalileo.init(this, endpoint = "${otlp}", apiKey = "${key}", service = "my-app")\n// OkHttp: .addInterceptor(Galileo.okHttpInterceptor(propagateTo = listOf("https://api.example.com")))`;
+    case "browser": return `<script src="${host}/rum.js" data-key="${key}" data-service="my-site"\n        data-endpoint="${otlp}"></script>`;
   }
 }
 
@@ -83,15 +82,15 @@ export default function WelcomePage() {
       {step === 1 && (
         <Card title="2 · Install and point the SDK at Galileo">
           <p className="text-sm text-muted mb-2">The key below is shown once. It goes into your app's environment, never into the browser (except the RUM key, which is scoped to the browser only).</p>
-          <pre className="whitespace-pre-wrap rounded border bg-bg p-3 font-mono text-[11px]">{snippet(stack, key, API_BASE)}</pre>
+          <pre className="whitespace-pre-wrap rounded border bg-bg p-3 font-mono text-[11px]">{snippet(stack, key, API_BASE, OTLP_BASE)}</pre>
           <p className="text-xs text-muted mt-2">Full details per stack: <Link className="underline" href={`/p/${pid}/settings`}>Settings → Connect</Link>.</p>
           <div className="mt-3 flex gap-2"><Button onClick={() => setStep(0)}>Back</Button><Button variant="primary" onClick={() => setStep(2)}>Done, waiting for traffic</Button></div>
         </Card>
       )}
       {step === 2 && (
         <Card title="3 · Waiting for the first trace">
-          <div className="flex items-center gap-2 text-sm"><Loader2 className="animate-spin text-accent" size={16} /> Listening on {API_BASE.replace(":8080", ":4318")} — make a request to your app. This page checks every 3 seconds.</div>
-          <p className="text-xs text-muted mt-2">Nothing arriving? Check the endpoint (http, port 4318), the key, and that the SDK flushes on exit for short scripts. Spans seen in the last hour: {spans}.</p>
+          <div className="flex items-center gap-2 text-sm"><Loader2 className="animate-spin text-accent" size={16} /> Listening on {OTLP_BASE} — make a request to your app. This page checks every 3 seconds.</div>
+          <p className="text-xs text-muted mt-2">Nothing arriving? Check the endpoint ({OTLP_BASE}), the key, and that the SDK flushes on exit for short scripts. Spans seen in the last hour: {spans}.</p>
           <div className="mt-3 flex gap-2"><Button onClick={() => setStep(1)}>Back</Button><Button onClick={() => setStep(3)}>Skip</Button></div>
         </Card>
       )}

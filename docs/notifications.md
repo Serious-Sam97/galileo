@@ -63,7 +63,7 @@ events. **Send now** delivers immediately; **Preview** shows the text.
 
 Every transition to warn/critical opens an incident (per group on per-group triggers) and back to
 ok closes it. Unacknowledged incidents are re-notified every 30 minutes; notifications carry an
-**Acknowledge** link (`/api/ack/<token>`, no login) and the trigger page has an Ack button.
+**Acknowledge** link (`/api/ack/<token>`, no login; the page asks for one click to confirm, so mail scanners and chat link previews cannot acknowledge on their own) and the trigger page has an Ack button.
 Acknowledging stops repeats and escalation.
 
 ## Maintenance windows and mutes

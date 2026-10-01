@@ -24,12 +24,30 @@ fn default_scopes() -> Vec<String> {
     vec!["ingest".into(), "gateway".into()]
 }
 
+/// What each scope unlocks: OTLP ingest, the LLM gateway, browser/mobile telemetry only, and
+/// deploy markers from CI.
+pub const SCOPES: [&str; 4] = ["ingest", "gateway", "rum", "deploy"];
+
+fn validate_scopes(scopes: &[String]) -> Result<Vec<String>, ApiError> {
+    if scopes.is_empty() {
+        return Err(ApiError::BadRequest("a key needs at least one scope".into()));
+    }
+    if let Some(bad) = scopes.iter().find(|s| !SCOPES.contains(&s.as_str())) {
+        return Err(ApiError::BadRequest(format!("unknown scope '{bad}' (expected one of {})", SCOPES.join(", "))));
+    }
+    let mut out = scopes.to_vec();
+    out.sort();
+    out.dedup();
+    Ok(out)
+}
+
 /// The raw key is returned exactly once, here.
 pub async fn create(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<CreateKey>) -> ApiResult<Json<serde_json::Value>> {
     pa.require_write()?;
+    let scopes = validate_scopes(&b.scopes)?;
     let raw = auth::new_api_key();
     let prefix = raw[..12].to_string();
-    let key = api_keys::create(&st.pg, pa.project.id, b.name.trim(), &auth::hash_api_key(&raw), &prefix, &b.scopes).await?;
+    let key = api_keys::create(&st.pg, pa.project.id, b.name.trim(), &auth::hash_api_key(&raw), &prefix, &scopes).await?;
     audit::project(&st.pg, &pa, "api_key.create", "api_key", key.id, json!({ "name": key.name, "scopes": key.scopes })).await;
     Ok(Json(json!({ "api_key": key, "key": raw })))
 }
@@ -49,4 +67,17 @@ pub async fn revoke(State(st): State<AppState>, pa: ProjectAccess, Path(p): Path
     st.resolver.invalidate_all();
     audit::project(&st.pg, &pa, "api_key.revoke", "api_key", p.key_id, json!({})).await;
     Ok(Json(json!({ "ok": true })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scopes_are_checked() {
+        assert_eq!(validate_scopes(&["gateway".into(), "ingest".into(), "ingest".into()]).unwrap(), vec!["gateway", "ingest"]);
+        assert!(validate_scopes(&[]).is_err());
+        assert!(validate_scopes(&["ingst".into()]).is_err());
+        assert!(validate_scopes(&["deploy".into()]).is_ok());
+    }
 }

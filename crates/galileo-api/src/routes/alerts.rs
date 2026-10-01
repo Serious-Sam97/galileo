@@ -377,15 +377,40 @@ pub async fn ack_incident(State(st): State<AppState>, pa: ProjectAccess, Path(p)
 }
 
 /// Unauthenticated acknowledgement from a notification link (signed by the per-incident token).
-pub async fn ack_by_token(State(st): State<AppState>, Path(token): Path<String>) -> axum::response::Response {
+type AckRow = (Uuid, String, Option<chrono::DateTime<Utc>>);
+
+async fn ack_row(st: &AppState, token: &str) -> Option<AckRow> {
+    sqlx::query_as("SELECT i.id, t.name, i.acknowledged_at FROM trigger_incidents i JOIN triggers t ON t.id = i.trigger_id WHERE i.ack_token = $1 AND length($1) >= 32").bind(token).fetch_optional(&st.pg).await.unwrap_or(None)
+}
+
+fn ack_page(body: String) -> axum::response::Response {
     use axum::response::IntoResponse;
-    let row: Option<(Uuid, String, Option<chrono::DateTime<Utc>>)> = sqlx::query_as("SELECT i.id, t.name, i.acknowledged_at FROM trigger_incidents i JOIN triggers t ON t.id = i.trigger_id WHERE i.ack_token = $1 AND length($1) >= 32").bind(&token).fetch_optional(&st.pg).await.unwrap_or(None);
-    let body = match row {
+    // Served on the UI origin (Caddy routes /api/ack/* there): no scripts, ever.
+    ([(axum::http::header::CONTENT_SECURITY_POLICY, "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"), (axum::http::header::REFERRER_POLICY, "no-referrer")],
+        axum::response::Html(format!("<!doctype html><meta charset=utf-8><meta name=robots content=noindex><title>Galileo</title><body style=\"font-family:system-ui;background:#0d1017;color:#e6e9ef;padding:2rem\">{body}</body>"))).into_response()
+}
+
+/// GET only shows the incident and a confirm button: link scanners in mail and chat unfurlers
+/// fetch links on their own, and must not acknowledge anything.
+pub async fn ack_by_token(State(st): State<AppState>, Path(token): Path<String>) -> axum::response::Response {
+    let esc = galileo_alerts::notify::html_escape;
+    ack_page(match ack_row(&st, &token).await {
         None => "<h2>Unknown or expired acknowledgement link</h2>".to_string(),
-        Some((_, name, Some(at))) => format!("<h2>{name}</h2><p>Already acknowledged at {at}.</p>"),
-        Some((id, name, None)) => { let _ = sqlx::query("UPDATE trigger_incidents SET acknowledged_at = now(), acknowledged_by = 'link' WHERE id = $1").bind(id).execute(&st.pg).await; format!("<h2>{name}</h2><p>Acknowledged. Repeat notifications and escalation stop; the incident closes when the trigger returns to ok.</p>") }
-    };
-    axum::response::Html(format!("<!doctype html><meta charset=utf-8><title>Galileo</title><body style=\"font-family:system-ui;background:#0d1017;color:#e6e9ef;padding:2rem\">{body}</body>")).into_response()
+        Some((_, name, Some(at))) => format!("<h2>{}</h2><p>Already acknowledged at {at}.</p>", esc(&name)),
+        Some((_, name, None)) => format!("<h2>{}</h2><form method=post><button type=submit style=\"font:inherit;padding:8px 14px;border-radius:6px;border:0;background:#f5a524;color:#1a1200;cursor:pointer\">Acknowledge incident</button></form>", esc(&name)),
+    })
+}
+
+pub async fn ack_by_token_confirm(State(st): State<AppState>, Path(token): Path<String>) -> axum::response::Response {
+    let esc = galileo_alerts::notify::html_escape;
+    ack_page(match ack_row(&st, &token).await {
+        None => "<h2>Unknown or expired acknowledgement link</h2>".to_string(),
+        Some((_, name, Some(at))) => format!("<h2>{}</h2><p>Already acknowledged at {at}.</p>", esc(&name)),
+        Some((id, name, None)) => {
+            let _ = sqlx::query("UPDATE trigger_incidents SET acknowledged_at = now(), acknowledged_by = 'link' WHERE id = $1 AND acknowledged_at IS NULL").bind(id).execute(&st.pg).await;
+            format!("<h2>{}</h2><p>Acknowledged. Repeat notifications and escalation stop; the incident closes when the trigger returns to ok.</p>", esc(&name))
+        }
+    })
 }
 
 #[derive(Deserialize)]

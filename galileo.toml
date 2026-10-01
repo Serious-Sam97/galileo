@@ -1,6 +1,10 @@
 # Galileo server configuration. Every key can be overridden with GALILEO_<SECTION>__<KEY>,
 # e.g. GALILEO_CLICKHOUSE__URL=http://ch:8123
 
+# URL where people open the UI (used in e-mails, invite and acknowledge links). Top-level key:
+# it must stay above the first [section], or TOML files it under that section and it is ignored.
+public_url = "http://localhost:3000"
+
 [server]
 api_addr = "127.0.0.1:8080"
 otlp_grpc_addr = "127.0.0.1:4317"
@@ -32,9 +36,6 @@ max_queued_rows = 200000
 spans = "30d"
 logs = "14d"
 metrics = "90d"
-
-# URL where people open the UI (used in e-mails and invite links).
-public_url = "http://localhost:3000"
 
 [smtp]
 # Leave host empty to disable e-mail channels. security: starttls | tls | none

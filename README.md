@@ -55,6 +55,8 @@ Configuration lives in `galileo.toml`; any key can be overridden with
 
 * [docs/connecting.md](docs/connecting.md) — pointing an OpenTelemetry SDK at Galileo, identity attributes, redaction
 * [docs/gateway.md](docs/gateway.md) — LLM gateway: providers, routes, fallbacks, budgets, prompt registry, trace joining
+* [docs/example-php-laravel.md](docs/example-php-laravel.md) — worked example: integrating a Laravel app end to end
+* [docs/sdk-go.md](docs/sdk-go.md) — Go SDK: net/http and chi middleware, pgx and go-redis spans with call sites, identity
 * [docs/sdk-python.md](docs/sdk-python.md) — `galileo-django`: code-level traces, query call sites, identity on logs
 * [docs/issues.md](docs/issues.md) — error tracking: exception grouping, lifecycle, deploy markers
 * [docs/organization.md](docs/organization.md) — roles, invites, all-projects overview, personal tokens, retention, audit

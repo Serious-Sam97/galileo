@@ -94,7 +94,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/projects/{project_id}/maintenance-windows/{window_id}", delete(alerts::delete_window))
         .route("/projects/{project_id}/oncall", get(alerts::list_oncall).post(alerts::create_oncall))
         .route("/projects/{project_id}/oncall/{schedule_id}", axum::routing::put(alerts::update_oncall).delete(alerts::delete_oncall))
-        .route("/ack/{token}", get(alerts::ack_by_token))
+        .route("/ack/{token}", get(alerts::ack_by_token).post(alerts::ack_by_token_confirm))
         .route("/projects/{project_id}/log-pipeline", get(logs::get_pipeline).put(logs::put_pipeline))
         .route("/projects/{project_id}/log-pipeline/preview", post(logs::preview))
         .route("/projects/{project_id}/log-metrics", get(logs::list_metrics).post(logs::create_metric))

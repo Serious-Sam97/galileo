@@ -1,4 +1,6 @@
-# Production override: two hostnames via Caddy (automatic TLS), databases not published.
+# Production override: two hostnames via Caddy, databases not published.
+# TLS: behind Cloudflare (default) Caddy serves plain HTTP on :80 (Caddyfile.cloudflare);
+# set GALILEO_CADDYFILE=Caddyfile for Caddy's own automatic TLS on 80/443.
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
 # deploy/.env must set:
@@ -8,7 +10,7 @@
 #   GALILEO_PUBLIC_URL     https://galileo.serious-sam.dev      links in notifications, SSO landing
 #   GALILEO_PUBLIC_API     https://galileo-api.serious-sam.dev  baked into the web build
 #   GALILEO_CORS_ORIGINS   ["https://galileo.serious-sam.dev"]  the UI origin calling the API
-# Optional: GALILEO_SMTP_*, GALILEO_OIDC_*, GALILEO_HOST_*_PORT (loopback port remaps).
+# Optional: GALILEO_CADDYFILE (Caddyfile.cloudflare | Caddyfile), GALILEO_SMTP_*, GALILEO_OIDC_*, GALILEO_HOST_*_PORT (loopback port remaps).
 #
 # Only Caddy takes public ports (80/443). Everything else is published on loopback for
 # debugging only -- Caddy reaches these services over the compose network, so if a host
@@ -27,7 +29,7 @@ services:
       GALILEO_WEB_DOMAIN: ${GALILEO_WEB_DOMAIN:-galileo.serious-sam.dev}
       GALILEO_API_DOMAIN: ${GALILEO_API_DOMAIN:-galileo-api.serious-sam.dev}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./${GALILEO_CADDYFILE:-Caddyfile.cloudflare}:/etc/caddy/Caddyfile:ro
       - galileo-caddy-data:/data
       - galileo-caddy-config:/config
     depends_on:

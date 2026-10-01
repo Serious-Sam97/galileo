@@ -1,5 +1,15 @@
 export const API_BASE = process.env.NEXT_PUBLIC_GALILEO_API ?? "http://localhost:8080";
 
+/** OTLP/HTTP base that apps export to. Locally the receiver has its own port (:8080 → :4318);
+ *  behind the reverse proxy it lives under the API host at `/otlp` (see deploy/Caddyfile).
+ *  NEXT_PUBLIC_GALILEO_OTLP overrides both. */
+export const OTLP_BASE = (process.env.NEXT_PUBLIC_GALILEO_OTLP ?? otlpFrom(API_BASE)).replace(/\/$/, "");
+
+export function otlpFrom(api: string): string {
+  const base = api.replace(/\/$/, "");
+  return /:8080$/.test(base) ? base.replace(/:8080$/, ":4318") : `${base}/otlp`;
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;

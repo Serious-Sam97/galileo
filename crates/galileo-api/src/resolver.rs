@@ -17,6 +17,15 @@ use crate::auth::hash_api_key;
 
 const TTL: Duration = Duration::from_secs(60);
 const NEGATIVE_TTL: Duration = Duration::from_secs(10);
+/// Past this many cached keys, expired entries are swept; if that is not enough (a flood of
+/// distinct bogus keys) the negative entries go too. Valid keys are few, so this stays small.
+const MAX_ENTRIES: usize = 10_000;
+
+/// Keys are minted as `glk_` + 40 base64url chars (`auth::new_api_key`). Anything else cannot
+/// match a row, so it is rejected without touching Postgres or the cache.
+fn plausible_key(raw: &str) -> bool {
+    raw.len() <= 64 && raw.starts_with("glk_") && raw[4..].bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
 
 struct Entry {
     ctx: Option<ProjectContext>,
@@ -86,6 +95,9 @@ impl PgResolver {
 #[async_trait]
 impl ApiKeyResolver for PgResolver {
     async fn resolve(&self, raw_key: &str) -> Option<ProjectContext> {
+        if !plausible_key(raw_key) {
+            return None;
+        }
         if let Some(e) = self.cache.get(raw_key) {
             let ttl = if e.ctx.is_some() { TTL } else { NEGATIVE_TTL };
             if e.at.elapsed() < ttl {
@@ -103,7 +115,27 @@ impl ApiKeyResolver for PgResolver {
                     .await;
             });
         }
+        if self.cache.len() >= MAX_ENTRIES {
+            self.cache.retain(|_, e| e.at.elapsed() < if e.ctx.is_some() { TTL } else { NEGATIVE_TTL });
+            if self.cache.len() >= MAX_ENTRIES {
+                self.cache.retain(|_, e| e.ctx.is_some());
+            }
+        }
         self.cache.insert(raw_key.to_owned(), Entry { ctx: ctx.clone(), at: Instant::now() });
         ctx
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_minted_key_shapes_reach_the_database() {
+        assert!(plausible_key(&crate::auth::new_api_key()));
+        assert!(!plausible_key("k1"));
+        assert!(!plausible_key("glt_abc"));
+        assert!(!plausible_key("glk_abc def"));
+        assert!(!plausible_key(&format!("glk_{}", "a".repeat(100))));
     }
 }

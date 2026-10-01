@@ -22,7 +22,8 @@ final class GalileoServiceProvider extends ServiceProvider
     public function register(): void
     {
         if (!getenv('GALILEO_API_KEY') && !config('galileo.api_key')) return;
-        Galileo::init(['endpoint' => config('galileo.endpoint') ?: null, 'api_key' => config('galileo.api_key') ?: null, 'service' => config('galileo.service') ?: (getenv('OTEL_SERVICE_NAME') ?: config('app.name'))]);
+        Galileo::init(['endpoint' => config('galileo.endpoint') ?: null, 'api_key' => config('galileo.api_key') ?: null, 'service' => config('galileo.service') ?: (getenv('OTEL_SERVICE_NAME') ?: config('app.name')),
+            'env' => config('galileo.env') ?: null, 'version' => config('galileo.release') ?: null]);
     }
 
     public function boot(): void
@@ -40,9 +41,11 @@ final class GalileoServiceProvider extends ServiceProvider
         }
     }
 
-    /** Called by the middleware once the user is resolved. */
+    /** Called by the middleware once the user is resolved. Identity the app already set during the
+     *  request (e.g. a tenant from a header) wins over the Auth default. */
     public static function identify(): void
     {
+        if (Identity::attributes()) return;
         $u = Auth::user();
         if ($u) Identity::set($u->getAuthIdentifier(), $u->email ?? null, $u->name ?? null, $u->tenant_id ?? null);
     }

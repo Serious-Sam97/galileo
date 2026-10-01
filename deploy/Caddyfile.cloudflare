@@ -3,8 +3,8 @@
 # Tunnel ingress: BOTH hostnames → http://localhost:80 (Caddy). Do not point the tunnel at
 # the API/web ports directly: the /otlp/* route and the acknowledge-link route live here.
 #
-# Use it by mounting this file instead of Caddyfile in docker-compose.prod.yml:
-#   volumes: [ ./Caddyfile.cloudflare:/etc/caddy/Caddyfile:ro, ... ]
+# This is the default in docker-compose.prod.yml (GALILEO_CADDYFILE unset). For direct TLS
+# without Cloudflare set GALILEO_CADDYFILE=Caddyfile in deploy/.env.
 
 {
 	auto_https off

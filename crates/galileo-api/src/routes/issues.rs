@@ -168,11 +168,41 @@ pub async fn list_deploys(State(st): State<AppState>, pa: ProjectAccess, QueryPa
     Ok(Json(json!({ "deploys": rows })))
 }
 
-/// Called from CI: `POST /api/projects/{id}/deploys {"version": "1.4.3"}` (session or API key with ingest scope).
-pub async fn create_deploy(State(st): State<AppState>, pa: ProjectAccess, Json(b): Json<DeployBody>) -> ApiResult<Json<serde_json::Value>> {
-    pa.require_write()?;
+/// Who may record a deploy: a signed-in member with write access, or — for CI — a project API
+/// key with the `deploy` scope, so pipelines do not need a personal token.
+pub enum DeployActor {
+    User(ProjectAccess),
+    Key(Uuid),
+}
+
+impl axum::extract::FromRequestParts<AppState> for DeployActor {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, st: &AppState) -> Result<Self, Self::Rejection> {
+        let bearer = parts.headers.get(axum::http::header::AUTHORIZATION).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")).map(|v| v.trim().to_owned());
+        let Some(raw) = bearer.filter(|k| k.starts_with("glk_")) else {
+            let pa = ProjectAccess::from_request_parts(parts, st).await?;
+            pa.require_write()?;
+            return Ok(DeployActor::User(pa));
+        };
+        let Path(DeployPath { project_id }) = Path::<DeployPath>::from_request_parts(parts, st).await.map_err(|_| ApiError::BadRequest("invalid project id".into()))?;
+        use galileo_otlp::ApiKeyResolver;
+        let ctx = st.resolver.resolve(&raw).await.ok_or(ApiError::Unauthorized)?;
+        if ctx.project_id.0 != project_id { return Err(ApiError::NotFound("project")); }
+        if !ctx.has_scope("deploy") { return Err(ApiError::Forbidden); }
+        Ok(DeployActor::Key(project_id))
+    }
+}
+
+#[derive(Deserialize)]
+pub struct DeployPath { project_id: Uuid }
+
+/// Called from CI: `POST /api/projects/{id}/deploys {"version": "1.4.3"}` with a session, a
+/// personal token (`glt_`) or a project key with the `deploy` scope (`glk_`).
+pub async fn create_deploy(State(st): State<AppState>, actor: DeployActor, Json(b): Json<DeployBody>) -> ApiResult<Json<serde_json::Value>> {
+    let project_id = match &actor { DeployActor::User(pa) => pa.project.id, DeployActor::Key(p) => *p };
     if b.version.trim().is_empty() { return Err(ApiError::BadRequest("version required".into())); }
     let row: Deploy = sqlx::query_as("INSERT INTO deploys (id, project_id, service, version, at, note, url) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, service, version, at, note, url")
-        .bind(Uuid::now_v7()).bind(pa.project.id).bind(&b.service).bind(b.version.trim()).bind(b.at.unwrap_or_else(Utc::now)).bind(&b.note).bind(&b.url).fetch_one(&st.pg).await?;
+        .bind(Uuid::now_v7()).bind(project_id).bind(&b.service).bind(b.version.trim()).bind(b.at.unwrap_or_else(Utc::now)).bind(&b.note).bind(&b.url).fetch_one(&st.pg).await?;
     Ok(Json(json!({ "deploy": row })))
 }

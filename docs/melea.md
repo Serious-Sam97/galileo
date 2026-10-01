@@ -70,7 +70,8 @@ curl -fsS -X POST https://galileo-api.serious-sam.dev/api/projects/$GALILEO_PROJ
   -d "{\"version\":\"$APP_VERSION\",\"service\":\"melea-api\",\"note\":\"$(git log -1 --pretty=%s)\"}"
 ```
 
-`GALILEO_DEPLOY_TOKEN` is a personal token (Settings → Personal tokens, `glt_…`) and
+`GALILEO_DEPLOY_TOKEN` is a project key with only the `deploy` scope (Settings → API keys,
+`glk_…`; a personal `glt_…` token also works but carries all of your permissions) and
 `GALILEO_PROJECT` the hosted project id (Settings → Project).
 
 ## 4. Browser sessions (optional)
@@ -111,7 +112,14 @@ the hostnames to the internal listeners:
 | `galileo-api.serious-sam.dev` | `/otlp/*` (prefix stripped) | `server:4318` |
 | `galileo-api.serious-sam.dev` | `/api`, `/gw`, `/rum.js` | `server:8080` |
 
-Point both DNS records at the host, open ports 80 and 443, then:
+Two TLS setups, picked with `GALILEO_CADDYFILE` in `deploy/.env`:
+
+- **Behind Cloudflare** (the default, `Caddyfile.cloudflare`): Cloudflare holds the certificates
+  and Caddy serves plain HTTP on :80. See "Behind a Cloudflare Tunnel" below.
+- **Caddy's own TLS** (`GALILEO_CADDYFILE=Caddyfile`): point both DNS records at the host and open
+  ports 80 and 443; Caddy requests the certificates on first start.
+
+Then:
 
 ```bash
 cd galileo/deploy
@@ -126,7 +134,7 @@ ENV
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
-Caddy requests the certificates on first start. ClickHouse and Postgres stay bound to localhost.
+ClickHouse and Postgres stay bound to localhost.
 Backups: `scripts/backup.sh` (see `docs/operations.md`).
 
 Why each variable matters:
@@ -148,8 +156,8 @@ Why each variable matters:
 If Cloudflare terminates TLS (Tunnel or proxied DNS), Caddy must not run ACME and the tunnel
 must point **both hostnames at Caddy's port 80**, never at the API or web ports directly:
 the `/otlp/*` route and the acknowledge-link route live in Caddy, so bypassing it turns every
-OTLP request into a 404 from the API. Mount `deploy/Caddyfile.cloudflare` instead of
-`Caddyfile` (plain `http://` site blocks, `auto_https off`) and reload Caddy. Tunnel ingress:
+OTLP request into a 404 from the API. This is the default `deploy/Caddyfile.cloudflare` (plain
+`http://` site blocks, `auto_https off`); leave `GALILEO_CADDYFILE` unset. Tunnel ingress:
 
 ```yaml
 ingress:

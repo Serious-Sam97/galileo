@@ -12,14 +12,17 @@ the backend request that made it slow.
 2. Add the script (served by Galileo itself):
 
 ```html
-<script src="https://galileo.example.com/rum.js"
+<script src="https://galileo-api.example.com/rum.js"
         data-key="glk_…" data-service="shop-web"
-        data-endpoint="https://galileo.example.com:4318"
+        data-endpoint="https://galileo-api.example.com/otlp"
         data-propagate="https://api.example.com"
         data-env="prod" data-version="2026.09.03"></script>
 ```
 
-or, in a bundle: `import "…/rum.js"` and `window.galileoRum.init({ key, service, endpoint, propagate: [...] })`.
+`data-endpoint` defaults to the OTLP receiver next to the script: `/otlp` on the same host
+behind the proxy, or port 4318 when the script is served straight from a local `:8080`.
+
+Or, in a bundle: `import "…/rum.js"` and `window.galileoRum.init({ key, service, endpoint, propagate: [...] })`.
 
 3. Let the API accept the trace header from the browser: add `traceparent` (and `tracestate`) to
    the CORS allowed headers of every origin listed in `data-propagate`. Same-origin calls need

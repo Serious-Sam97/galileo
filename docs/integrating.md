@@ -16,6 +16,7 @@ API and gateway, `:4318` OTLP/HTTP, `:4317` OTLP/gRPC).
    - `ingest` — send traces, logs, metrics (OTLP)
    - `gateway` — call LLMs through `/gw`
    - `rum` — browser/mobile telemetry only (safe to ship to clients)
+   - `deploy` — record deploy markers from CI (nothing else)
 3. The full key (`glk_…`) is shown once. Keep it in the app's environment, never in a repo.
 
 ## 2. Endpoints
@@ -65,9 +66,11 @@ management commands and workers. Inert unless `GALILEO_OTLP_ENDPOINT` is set. �
 ```python
 import galileo
 galileo.init(endpoint="https://galileo-api.serious-sam.dev/otlp", api_key=KEY, service="my-api", env="prod")
-galileo.fastapi.instrument(app)          # or galileo.flask.instrument(app)
+from galileo.fastapi import GalileoMiddleware
+app.add_middleware(GalileoMiddleware)    # Flask: import galileo.flask; galileo.flask.instrument(app)
+import galileo.sqlalchemy
 galileo.sqlalchemy.instrument(engine)    # SQL spans with call sites
-galileo.identity.set(user_id="42", tenant_id="clinic-7")   # in your auth dependency
+galileo.set_identity(user_id="42", tenant="clinic-7")   # in your auth dependency
 ```
 Logging is captured from the root logger; `galileo.capture_exception(e)` files an issue.
 
@@ -76,14 +79,16 @@ Logging is captured from the root logger; `galileo.capture_exception(e)` files a
 node --import @galileo/node/register server.js     # zero-code, reads GALILEO_* env
 ```
 or `init({ endpoint, apiKey, service, env })` as the first import. Auto-instruments http,
-express, fastify, pg, mysql, redis; `setIdentity({ userId, tenantId })` per request. → `docs/sdk-node.md`
+express, fastify, pg, mysql, redis; `setIdentity({ id, tenant })` per request. → `docs/sdk-node.md`
 
 ### PHP / Laravel — `galileo/php` (`sdk/php`, needs Guzzle)
 ```php
 \Galileo\Galileo::init(['endpoint' => 'https://galileo-api.serious-sam.dev/otlp', 'api_key' => $key, 'service' => 'shop', 'env' => 'prod']);
 ```
 Laravel: register `Galileo\Laravel\GalileoServiceProvider`, add the middleware, set
-`GALILEO_*` in `.env`; Eloquent queries and Monolog logs are picked up. → `docs/sdk-php.md`
+`GALILEO_*` in `.env`; Eloquent queries and Monolog logs are picked up. → `docs/sdk-php.md`, and
+[example-php-laravel.md](example-php-laravel.md) for a full worked integration (config caching, logs,
+queues, outgoing calls, gateway, RUM, CI)
 
 ### Rust (axum, sqlx) — `galileo` crate (`sdk/rust/galileo`)
 ```rust
@@ -92,6 +97,17 @@ let app = Router::new().route("/media/{id}", get(media)).layer(axum::middleware:
 let row = galileo::sql!("SELECT * FROM media WHERE id = $1", "postgresql", sqlx::query_as(..).fetch_one(&pool));
 ```
 → `docs/sdk-rust.md`
+
+### Go (net/http, chi, pgx, go-redis) — `github.com/Serious-Sam97/galileo/sdk/go`
+```go
+tel, _ := galileo.Init(ctx, galileo.ConfigFromEnv())            // GALILEO_* env as above
+defer tel.Shutdown(context.Background())
+handler := tel.Middleware(galileo.WithServeMux(mux))(auth(galileo.Identify(resolveUser)(mux)))
+pgxCfg.ConnConfig.Tracer = pgxtrace.New()                        // SQL spans with call sites
+rdb.AddHook(redistrace.Hook{})
+```
+Go cannot be patched at runtime, so HTTP, the DB driver and Redis are wired once at startup;
+chi uses `galileo.WithRoute(chiroute.Pattern)`. → `docs/sdk-go.md`
 
 ### Android (Kotlin) — `galileo-android` (`sdk/android`, AAR)
 ```kotlin
@@ -130,7 +146,9 @@ the model:
 from openai import OpenAI
 client = OpenAI(base_url="https://galileo-api.serious-sam.dev/gw/v1", api_key=GALILEO_API_KEY)
 client.chat.completions.create(model="my-app-chat", messages=[...],
-    extra_headers={"x-galileo-user": user_id, "x-galileo-conversation": conversation_id})
+    extra_headers={"x-galileo-user-id": user_id, "x-galileo-tenant-id": tenant_id,
+                   "x-galileo-conversation-id": conversation_id,
+                   "traceparent": traceparent})   # W3C context of the active span: joins the call to the request trace
 ```
 
 Anthropic SDKs work the same with `base_url=https://galileo-api.serious-sam.dev/gw` (`/v1/messages`).
@@ -142,10 +160,11 @@ too. Prompts can be managed in Galileo and referenced by name; feedback lands on
 
 ```bash
 curl -X POST https://galileo-api.serious-sam.dev/api/projects/<project id>/deploys \
-  -H "Authorization: Bearer glt_<personal token>" -H 'content-type: application/json' \
+  -H "Authorization: Bearer glk_<key with the deploy scope>" -H 'content-type: application/json' \
   -d '{"version":"1.4.2","service":"my-api","note":"'"$(git log -1 --pretty=%s)"'"}'
 ```
-or `galileo deploy 1.4.2 --service my-api` with the CLI. Charts get a marker; issues record the
+Use a project key with only the `deploy` scope; a personal token (`glt_…`) also works but acts
+with all of your permissions. Or `galileo deploy 1.4.2 --service my-api` with the CLI. Charts get a marker; issues record the
 version they were first seen on. Send the same string as `service.version`.
 
 ## 6. Check it worked

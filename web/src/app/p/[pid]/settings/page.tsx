@@ -9,7 +9,7 @@ import type { ApiKey, RedactionRule, Member, Invite, ApiToken, AuditRow, Channel
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { del as apiDel, get as apiGet, patch as apiPatch, post as apiPost, put as apiPut } from "@/lib/api";
 import { ago, fmtTime, fmtNum, fmtMs, fmtDuration } from "@/lib/format";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, OTLP_BASE } from "@/lib/api";
 import { Plus, Trash2, Copy, Pencil } from "lucide-react";
 import { RecipientsEditor, type Recipient } from "@/components/recipients";
 import { put } from "@/lib/api";
@@ -86,7 +86,7 @@ function Keys() {
         ) : (
           <form className="space-y-3" onSubmit={async (e) => { e.preventDefault(); const r = await create.mutateAsync(form); setCreated(r.key); }}>
             <div><Label>Name</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required placeholder="erp-vet production" /></div>
-            <div><Label>Scopes</Label>{["ingest", "gateway", "rum"].map((s) => <label key={s} className="mr-4 text-sm"><input type="checkbox" className="mr-1" checked={form.scopes.includes(s)} onChange={(e) => setForm({ ...form, scopes: e.target.checked ? [...form.scopes, s] : form.scopes.filter((x) => x !== s) })} />{s}</label>)}</div>
+            <div><Label>Scopes</Label>{["ingest", "gateway", "rum", "deploy"].map((s) => <label key={s} className="mr-4 text-sm"><input type="checkbox" className="mr-1" checked={form.scopes.includes(s)} onChange={(e) => setForm({ ...form, scopes: e.target.checked ? [...form.scopes, s] : form.scopes.filter((x) => x !== s) })} />{s}</label>)}</div>
             <ErrorBox error={create.error} />
             <Button type="submit" variant="primary">Create</Button>
           </form>
@@ -98,7 +98,7 @@ function Keys() {
 
 function Connect() {
   const gw = API_BASE.replace(/\/$/, "");
-  const otlp = gw.replace(":8080", ":4318");
+  const otlp = OTLP_BASE;
   const snippets: { title: string; code: string }[] = [
     { title: "Browser (galileo-rum — page loads, fetches, JS errors, Web Vitals)", code: `<script src="${API_BASE}/rum.js" data-key="glk_... (rum scope)" data-service="my-web"\n        data-endpoint="${otlp}" data-propagate="https://api.example.com"></script>\n<!-- add 'traceparent' to the API's CORS allowed headers so fetches join the backend trace -->` },
     { title: "Any OpenTelemetry SDK (env vars)", code: `OTEL_EXPORTER_OTLP_ENDPOINT=${otlp}\nOTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer glk_..."\nOTEL_SERVICE_NAME=my-app` },
@@ -114,7 +114,7 @@ function Connect() {
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {snippets.map((s) => <Card key={s.title} title={s.title}><pre className="whitespace-pre-wrap rounded border bg-bg p-2 font-mono text-[11px]">{s.code}</pre></Card>)}
-      <Card title="Endpoints"><div className="font-mono text-[12px] space-y-1"><div>OTLP/HTTP <span className="text-muted">{otlp}/v1/{"{traces,logs,metrics}"}</span></div><div>OTLP/gRPC <span className="text-muted">{otlp.replace("4318", "4317")}</span></div><div>Gateway <span className="text-muted">{gw}/gw/v1/messages · {gw}/gw/v1/chat/completions</span></div></div></Card>
+      <Card title="Endpoints"><div className="font-mono text-[12px] space-y-1"><div>OTLP/HTTP <span className="text-muted">{otlp}/v1/{"{traces,logs,metrics}"}</span></div><div>OTLP/gRPC <span className="text-muted">{otlp.endsWith(":4318") ? otlp.replace(/:4318$/, ":4317") : "not exposed through the proxy; use OTLP/HTTP"}</span></div><div>Gateway <span className="text-muted">{gw}/gw/v1/messages · {gw}/gw/v1/chat/completions</span></div></div></Card>
     </div>
   );
 }

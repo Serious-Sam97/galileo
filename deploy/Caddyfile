@@ -1,23 +1,31 @@
-{
-    auto_https off
+# Galileo on two hostnames with automatic TLS: Caddy owns ports 80/443 and gets the
+# certificates itself (Let's Encrypt). Both DNS records must point at this host.
+#
+# Selected with GALILEO_CADDYFILE=Caddyfile in deploy/.env. Behind Cloudflare (Tunnel or proxied
+# DNS) use Caddyfile.cloudflare instead, which is the default.
+
+{$GALILEO_WEB_DOMAIN:galileo.serious-sam.dev} {
+	encode zstd gzip
+
+	# acknowledge links in e-mail and Slack point at the UI host
+	handle /api/ack/* {
+		reverse_proxy server:8080
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
 }
 
-http://galileo.serious-sam.dev {
-    encode zstd gzip
-    handle /api/ack/* {
-        reverse_proxy server:8080
-    }
-    handle {
-        reverse_proxy web:3000
-    }
-}
+{$GALILEO_API_DOMAIN:galileo-api.serious-sam.dev} {
+	encode zstd gzip
 
-http://galileo-api.serious-sam.dev {
-    encode zstd gzip
-    handle_path /otlp/* {
-        reverse_proxy server:4318
-    }
-    handle {
-        reverse_proxy server:8080
-    }
+	# https://<api domain>/otlp/v1/traces → server:4318/v1/traces
+	handle_path /otlp/* {
+		reverse_proxy server:4318
+	}
+
+	handle {
+		reverse_proxy server:8080
+	}
 }
